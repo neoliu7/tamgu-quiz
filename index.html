@@ -1,0 +1,978 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>탐구 문제풀이</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+<style>
+:root{
+  --bg:#f5f6f8; --surface:#ffffff; --surface2:#f0f2f5; --text:#1d2330; --muted:#667085; --line:#e2e5ea;
+  --primary:#2f5bd3; --primary-weak:#e7edfb; --ok:#1f8a4c; --ok-weak:#e3f4ea; --bad:#c9302c; --bad-weak:#fbe7e6;
+  --warn:#b7791f; --warn-weak:#fdf3e1; --shadow:0 1px 3px rgba(16,24,40,.08);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#13161c; --surface:#1c2028; --surface2:#252a34; --text:#e7eaf0; --muted:#9aa3b2; --line:#323846;
+    --primary:#7a9cff; --primary-weak:#25304d; --ok:#4cc27e; --ok-weak:#1d3328; --bad:#f2726c; --bad-weak:#3a2222;
+    --warn:#e3b04f; --warn-weak:#3a3020; --shadow:none;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#13161c; --surface:#1c2028; --surface2:#252a34; --text:#e7eaf0; --muted:#9aa3b2; --line:#323846;
+  --primary:#7a9cff; --primary-weak:#25304d; --ok:#4cc27e; --ok-weak:#1d3328; --bad:#f2726c; --bad-weak:#3a2222;
+  --warn:#e3b04f; --warn-weak:#3a3020; --shadow:none;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif;font-size:15px;line-height:1.6}
+header{background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10}
+.hwrap{max-width:960px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.logo{font-weight:700;font-size:17px;margin-right:auto;cursor:pointer}
+nav{display:flex;gap:4px;flex-wrap:wrap}
+nav button{background:none;border:0;color:var(--muted);padding:6px 10px;border-radius:8px;font:inherit;cursor:pointer}
+nav button.on{background:var(--primary-weak);color:var(--primary);font-weight:600}
+main{max-width:960px;margin:0 auto;padding:20px 16px 60px}
+h2{font-size:20px;margin:0 0 14px}
+h3{font-size:16px;margin:0 0 10px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px;box-shadow:var(--shadow)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px}
+.kpi .l{color:var(--muted);font-size:13px}
+.kpi .v{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums}
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);color:var(--text);padding:9px 16px;border-radius:9px;font:inherit;cursor:pointer}
+.btn:hover{border-color:var(--primary)}
+.btn.pri{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:600}
+.btn.danger{color:var(--bad)}
+.btn.sm{padding:5px 10px;font-size:13px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.sp{flex:1}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:13px}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.tbl{overflow-x:auto}
+.badge{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;font-weight:600;white-space:nowrap}
+.b-bad{background:var(--bad-weak);color:var(--bad)} .b-ok{background:var(--ok-weak);color:var(--ok)}
+.b-warn{background:var(--warn-weak);color:var(--warn)} .b-mute{background:var(--surface2);color:var(--muted)}
+.b-pri{background:var(--primary-weak);color:var(--primary)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:99px;padding:5px 12px;cursor:pointer;user-select:none;background:var(--surface)}
+.chip input{margin:0}
+.chip.on{border-color:var(--primary);background:var(--primary-weak);color:var(--primary)}
+.field{margin-bottom:16px}
+.field>label.t{display:block;font-weight:600;margin-bottom:6px}
+input[type=number],input[type=text],select,textarea{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+textarea{width:100%;min-height:140px;resize:vertical}
+input[type=text].ans{width:100%;font-size:17px;padding:12px}
+.drop{border:2px dashed var(--line);border-radius:12px;padding:30px;text-align:center;cursor:pointer;color:var(--muted)}
+.drop.over{border-color:var(--primary);background:var(--primary-weak)}
+.weak-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+.weak-item:last-child{border-bottom:0}
+.bar{height:8px;background:var(--surface2);border-radius:99px;overflow:hidden;flex:1;max-width:220px}
+.bar i{display:block;height:100%;background:var(--bad)}
+/* quiz */
+.qhead{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:14px;color:var(--muted)}
+.progress{height:6px;background:var(--surface2);border-radius:99px;margin:10px 0 16px;overflow:hidden}
+.progress i{display:block;height:100%;background:var(--primary);transition:width .3s}
+.qtext{font-size:17px;line-height:1.75;margin-bottom:14px;word-break:keep-all;overflow-wrap:anywhere}
+.qnum{font-weight:700;margin-right:4px}
+.bogi{border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:10px 0;background:var(--surface2);position:relative;font-size:15.5px}
+.bogi-t{display:block;text-align:center;font-weight:600;margin-bottom:6px}
+.qimg{max-width:100%;border-radius:8px;border:1px solid var(--line);margin:8px 0;display:block}
+.choices{display:flex;flex-direction:column;gap:8px}
+.choice{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:10px;padding:11px 14px;cursor:pointer;background:var(--surface)}
+.choice:hover{border-color:var(--primary)}
+.choice.sel{border-color:var(--primary);background:var(--primary-weak)}
+.choice.correct{border-color:var(--ok);background:var(--ok-weak)}
+.choice.wrong{border-color:var(--bad);background:var(--bad-weak)}
+.choice .no{font-weight:700;min-width:20px}
+.choice.locked{cursor:default}
+.fb{border-radius:10px;padding:14px 16px;margin-top:16px}
+.fb.ok{background:var(--ok-weak);border:1px solid var(--ok)}
+.fb.bad{background:var(--bad-weak);border:1px solid var(--bad)}
+.fb.neu{background:var(--surface2);border:1px solid var(--line)}
+.fb .title{font-weight:700;font-size:17px;margin-bottom:4px}
+.expl{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)}
+.selfgrade{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.timer{font-variant-numeric:tabular-nums;font-weight:600;color:var(--text)}
+.timer.low{color:var(--bad)}
+.charts{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.chartbox{position:relative;height:260px}
+@media (max-width:720px){.charts{grid-template-columns:1fr}}
+.list-q{border-bottom:1px solid var(--line);padding:12px 0}
+.list-q:last-child{border-bottom:0}
+.msg{padding:6px 10px;border-radius:6px;margin:4px 0;font-size:13.5px}
+.msg.err{background:var(--bad-weak);color:var(--bad)} .msg.wrn{background:var(--warn-weak);color:var(--warn)}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1d2330;color:#fff;padding:10px 18px;border-radius:10px;z-index:99;font-size:14px;opacity:0;transition:opacity .25s;pointer-events:none;max-width:90vw}
+.toast.show{opacity:1}
+.empty{text-align:center;padding:40px 10px}
+.empty p{color:var(--muted)}
+details summary{cursor:pointer;color:var(--primary)}
+.hint{font-size:13px;color:var(--muted);margin-top:6px}
+.kbd{border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:12px}
+</style>
+</head>
+<body>
+<header><div class="hwrap">
+  <div class="logo" onclick="go('home')">📘 탐구 문제풀이</div>
+  <nav id="nav">
+    <button data-v="home">홈</button>
+    <button data-v="setup">문제풀기</button>
+    <button data-v="analysis">분석</button>
+    <button data-v="wrong">오답노트</button>
+    <button data-v="upload">문제관리</button>
+  </nav>
+</div></header>
+<main id="app"></main>
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+/* =========================================================
+   1. 저장소 (localStorage + IndexedDB 이미지)
+   ========================================================= */
+const LS_KEY = 'tamgu_quiz_v1';
+let DB = loadDB();
+function loadDB(){
+  try{ const s = localStorage.getItem(LS_KEY); if(s){ const d = JSON.parse(s); return Object.assign({questions:[],attempts:[],wrong:{},settings:null,sharedHash:null}, d); } }catch(e){}
+  return {questions:[], attempts:[], wrong:{}, settings:null};
+}
+function saveDB(){
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(DB)); }
+  catch(e){ toast('⚠ 저장 실패: 브라우저 저장공간이 부족하거나 차단되었습니다. 백업을 내보내 주세요.'); }
+}
+const IMG = {
+  db:null,
+  open(){ return new Promise((res,rej)=>{ if(this.db) return res(this.db);
+    try{ const r = indexedDB.open('tamgu_quiz_img',1);
+      r.onupgradeneeded = ()=> r.result.createObjectStore('img');
+      r.onsuccess = ()=>{ this.db = r.result; res(this.db); };
+      r.onerror = ()=> rej(r.error);
+    }catch(e){ rej(e); } }); },
+  async put(k,v){ const db = await this.open(); return new Promise((res,rej)=>{ const t = db.transaction('img','readwrite'); t.objectStore('img').put(v,k); t.oncomplete=res; t.onerror=()=>rej(t.error); }); },
+  async get(k){ try{ const db = await this.open(); return await new Promise(res=>{ const r = db.transaction('img').objectStore('img').get(k); r.onsuccess=()=>res(r.result||null); r.onerror=()=>res(null); }); }catch(e){ return null; } },
+  async keys(){ try{ const db = await this.open(); return await new Promise(res=>{ const r = db.transaction('img').objectStore('img').getAllKeys(); r.onsuccess=()=>res(r.result||[]); r.onerror=()=>res([]); }); }catch(e){ return []; } },
+  async clear(){ try{ const db = await this.open(); return await new Promise(res=>{ const t = db.transaction('img','readwrite'); t.objectStore('img').clear(); t.oncomplete=res; t.onerror=res; }); }catch(e){} }
+};
+
+/* =========================================================
+   2. 공통 유틸
+   ========================================================= */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const CIRCLED = ['①','②','③','④','⑤','⑥','⑦','⑧'];
+const TYPES = ['객관식','단답형','서술형'];
+const DIFFS = ['상','중','하'];
+const pct = v => v==null || isNaN(v) ? '-' : Math.round(v*100)+'%';
+const fmtSec = s => { s = Math.round(s||0); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); };
+const dayKey = ts => { const d = new Date(ts); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
+function toast(m){ const t = $('#toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toast._t); toast._t = setTimeout(()=>t.classList.remove('show'), 2600); }
+function shuffle(a){ a = a.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+
+/* 텍스트 → HTML (줄바꿈, 〈보기〉 박스) + 수식 렌더링 */
+function rich(s){ return esc(s).replace(/\r?\n/g,'<br>'); }
+function qTextHTML(text){
+  // 한 줄에 '〈보기〉'만 단독으로 있을 때 그 아래를 보기 박스로 표시 (문장 속 '〈보기〉에서'는 그대로 둠)
+  const s = String(text||''), m = s.match(/\r?\n[ \t]*[〈<]\s*보\s*기\s*[〉>][ \t]*(\r?\n|$)/);
+  if(!m) return rich(s);
+  return rich(s.slice(0, m.index)) + `<div class="bogi"><span class="bogi-t">〈보 기〉</span>${rich(s.slice(m.index + m[0].length))}</div>`;
+}
+function renderMath(el){
+  if(window.renderMathInElement){
+    try{ renderMathInElement(el, {delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false},{left:'\\(',right:'\\)',display:false},{left:'\\[',right:'\\]',display:true}], throwOnError:false}); }catch(e){}
+  }
+}
+async function hydrateImages(el){
+  for(const img of el.querySelectorAll('img[data-img]')){
+    const k = img.dataset.img;
+    if(/^(https?:|data:)/i.test(k)){ img.src = k; continue; }
+    const blob = await IMG.get(k);
+    if(blob){ img.src = URL.createObjectURL(blob); continue; }
+    img.onerror = ()=> img.replaceWith(Object.assign(document.createElement('div'),{className:'msg wrn',textContent:`이미지 '${k}'를 찾을 수 없습니다. (images 폴더 또는 문제관리 이미지 업로드 확인)`}));
+    img.src = 'images/' + encodeURIComponent(k);
+  }
+}
+function imgHTML(q){ return q.image ? `<img class="qimg" data-img="${esc(q.image)}" alt="문제 이미지">` : ''; }
+
+/* =========================================================
+   3. 통계 엔진
+   ========================================================= */
+function aggregate(atts, keyFn){
+  const m = new Map();
+  for(const a of atts){ const k = keyFn(a); if(k==null) continue;
+    let o = m.get(k); if(!o){ o = {key:k,n:0,sum:0,time:0,sample:a}; m.set(k,o); }
+    o.n++; o.sum += a.score; o.time += a.time||0; }
+  for(const o of m.values()){ o.acc = o.sum/o.n; o.avgTime = o.time/o.n; }
+  return [...m.values()];
+}
+const MIN_N = 5, WEAK = 0.6, GOOD = 0.8;
+function judge(o){
+  if(o.n < MIN_N) return '<span class="badge b-mute">표본부족</span>';
+  if(o.acc < WEAK) return '<span class="badge b-bad">🔴 취약</span>';
+  if(o.acc < GOOD) return '<span class="badge b-warn">🟡 보통</span>';
+  return '<span class="badge b-ok">🟢 양호</span>';
+}
+function unitAccMap(){ const r = {}; for(const o of aggregate(DB.attempts, a=>a.subject+'|'+a.unit)) r[o.key] = o.acc; return r; }
+function weakUnits(atts, limit=3){
+  return aggregate(atts, a=>a.subject+'|'+a.unit).filter(o=>o.n>=MIN_N && o.acc<WEAK).sort((a,b)=>a.acc-b.acc||b.n-a.n).slice(0,limit);
+}
+function streakDays(){
+  const days = new Set(DB.attempts.map(a=>dayKey(a.ts)));
+  let d = new Date(); if(!days.has(dayKey(d))) d.setDate(d.getDate()-1);
+  let n = 0; while(days.has(dayKey(d))){ n++; d.setDate(d.getDate()-1); }
+  return n;
+}
+const openWrong = () => Object.entries(DB.wrong).filter(([id,w])=>!w.cleared && DB.questions.some(q=>q.id===id));
+
+/* =========================================================
+   4. 라우팅
+   ========================================================= */
+let current = 'home', session = null, timerId = null, charts = [];
+const VIEWS = {home:viewHome, upload:viewUpload, setup:viewSetup, quiz:viewQuiz, result:viewResult, analysis:viewAnalysis, wrong:viewWrong};
+function go(v){
+  if(current==='quiz' && v!=='quiz' && v!=='result' && session && !session.done){
+    if(!confirm('풀이 중인 세션을 종료할까요? 지금까지 제출한 답은 저장됩니다.')) return;
+    finishSession(false);
+  }
+  current = v; charts.forEach(c=>c.destroy()); charts = [];
+  document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on', b.dataset.v===v || (v==='quiz'&&b.dataset.v==='setup') || (v==='result'&&b.dataset.v==='setup')));
+  VIEWS[v](); window.scrollTo(0,0);
+}
+document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>go(b.dataset.v));
+
+/* =========================================================
+   5. 홈
+   ========================================================= */
+function viewHome(){
+  const atts = DB.attempts, nQ = DB.questions.length;
+  if(!nQ && SHARED_INFO.loading){ $('#app').innerHTML = `<div class="card empty"><h2>공용 문제은행을 불러오는 중…</h2></div>`; return; }
+  if(!nQ){
+    $('#app').innerHTML = `<div class="card empty">
+      <h2>문제은행이 비어 있습니다</h2>
+      <p>양식에 맞춘 엑셀(xlsx)·CSV 파일을 업로드하거나, 샘플 문제로 바로 체험해 보세요.</p>
+      <div class="row" style="justify-content:center;margin-top:16px">
+        <button class="btn pri" onclick="loadSample(true)">샘플 문제 불러오기</button>
+        <button class="btn" onclick="go('upload')">문제 업로드</button>
+        <button class="btn" onclick="downloadTemplate()">📥 업로드 양식 받기</button>
+      </div></div>`;
+    return;
+  }
+  const acc = atts.length ? atts.reduce((s,a)=>s+a.score,0)/atts.length : null;
+  const weak = weakUnits(atts);
+  const wn = openWrong().length;
+  $('#app').innerHTML = `
+    <div class="kpis">
+      <div class="kpi"><div class="l">문제은행</div><div class="v">${nQ}</div></div>
+      <div class="kpi"><div class="l">누적 풀이</div><div class="v">${atts.length}</div></div>
+      <div class="kpi"><div class="l">전체 정답률</div><div class="v">${pct(acc)}</div></div>
+      <div class="kpi"><div class="l">연속 학습</div><div class="v">${streakDays()}일</div></div>
+      <div class="kpi"><div class="l">미해결 오답</div><div class="v">${wn}</div></div>
+    </div>
+    <div class="card">
+      <h3>⚠ 취약 영역 Top 3</h3>
+      ${weak.length ? weak.map((o,i)=>`<div class="weak-item"><b>${i+1}.</b><span>${esc(o.sample.subject)} &gt; ${esc(o.sample.unit)}</span><span class="sp"></span>
+          <div class="bar"><i style="width:${Math.round(o.acc*100)}%"></i></div><b style="min-width:44px;text-align:right">${pct(o.acc)}</b><span class="muted small">(${o.n}문항)</span></div>`).join('')
+        : `<p class="muted">${atts.length ? `정답률 ${WEAK*100}% 미만인 단원이 없습니다. (단원별 ${MIN_N}문항 이상 풀어야 판정됩니다)` : '아직 풀이 기록이 없습니다. 문제를 풀면 취약 영역을 자동으로 분석합니다.'}</p>`}
+    </div>
+    <div class="row" style="justify-content:center">
+      <button class="btn pri" onclick="go('setup')">▶ 새로 풀기</button>
+      <button class="btn" onclick="startWrongSession()" ${wn?'':'disabled'}>↻ 오답만 다시 풀기 (${wn})</button>
+      <button class="btn" onclick="go('analysis')">📊 분석 리포트</button>
+    </div>`;
+}
+
+/* =========================================================
+   6. 업로드 / 문제관리
+   ========================================================= */
+const COLMAP = {'문항id':'id','id':'id','과목':'subject','대단원':'unit','단원':'unit','소단원':'subunit','유형':'type','난이도':'difficulty','문제':'text','이미지':'image',
+  '보기1':'c1','보기2':'c2','보기3':'c3','보기4':'c4','보기5':'c5','선택지1':'c1','선택지2':'c2','선택지3':'c3','선택지4':'c4','선택지5':'c5','정답':'answer','해설':'explanation','배점':'points','채점기준':'criteria'};
+function normType(t){ t = String(t||'').replace(/\s/g,'');
+  if(/객관|선다|5지|오지/.test(t)) return '객관식';
+  if(/단답|주관/.test(t)) return '단답형';
+  if(/서술|논술/.test(t)) return '서술형';
+  return null; }
+let pending = null;
+
+function viewUpload(){
+  const bySub = {};
+  for(const q of DB.questions){ const s = bySub[q.subject] ||= {n:0,shared:0,'객관식':0,'단답형':0,'서술형':0}; s.n++; s[q.type]++; if(q.src==='shared') s.shared++; }
+  const nShared = DB.questions.filter(q=>q.src==='shared').length, nLocal = DB.questions.length - nShared;
+  $('#app').innerHTML = `
+  <h2>문제관리</h2>
+  <div class="card">
+    <div class="row"><h3 style="margin:0">문제 업로드</h3><span class="sp"></span>
+      <button class="btn sm" onclick="downloadTemplate()">📥 업로드 양식(xlsx)</button></div>
+    <div class="drop" id="drop" style="margin-top:12px">📄 파일을 끌어다 놓거나 클릭하세요 (xlsx · xls · csv)<input type="file" id="file" accept=".xlsx,.xls,.csv" hidden></div>
+    <div id="pv"></div>
+  </div>
+  <div class="card">
+    <h3>문제은행 현황 <span class="muted small">(공용 ${nShared} · 개인 ${nLocal}문항)</span></h3>
+    ${SHARED_INFO.available?`<div class="msg ${SHARED_INFO.error?'err':'wrn'}" style="margin-bottom:10px">🌐 공용 문제은행(<b>${SHARED_FILE}</b>)은 관리자가 서버에 올린 파일로 자동 동기화됩니다. 여기서 삭제할 수 없으며, 파일이 바뀌면 다음 접속 때 자동 반영됩니다.${SHARED_INFO.error?' · 최근 동기화 실패: '+esc(SHARED_INFO.error):''}</div>`:''}
+    ${DB.questions.length ? `<div class="tbl"><table><tr><th>과목</th><th class="num">문항수</th><th class="num">공용</th><th class="num">객관식</th><th class="num">단답형</th><th class="num">서술형</th><th></th></tr>
+      ${Object.entries(bySub).map(([s,o])=>`<tr><td>${esc(s)}</td><td class="num">${o.n}</td><td class="num">${o.shared}</td><td class="num">${o['객관식']}</td><td class="num">${o['단답형']}</td><td class="num">${o['서술형']}</td>
+      <td class="num">${o.n>o.shared?`<button class="btn sm danger" data-del="${esc(s)}">개인문제 삭제</button>`:''}</td></tr>`).join('')}</table></div>` : '<p class="muted">등록된 문제가 없습니다.</p>'}
+    <div class="row" style="margin-top:12px">
+      ${SHARED_INFO.available?'<button class="btn sm" onclick="syncSharedBank(true)">🌐 공용 문제은행 다시 불러오기</button>':''}
+      <button class="btn sm" onclick="loadSample(false)">샘플 문제 추가</button>
+      <button class="btn sm" onclick="exportBank()" ${DB.questions.length?'':'disabled'}>문제은행 xlsx로 내보내기</button>
+      <button class="btn sm danger" onclick="if(confirm('직접 올린 개인 문제를 모두 삭제할까요? (공용 문제·학습기록은 유지)')){DB.questions=DB.questions.filter(q=>q.src==='shared');saveDB();viewUpload();}" ${nLocal?'':'disabled'}>개인 문제 전체 삭제</button>
+    </div>
+  </div>
+  <div class="card">
+    <h3>문제 이미지</h3>
+    <p class="small muted" style="margin-top:0">양식의 '이미지' 열에 파일명(예: phy_001.png)을 적었다면 같은 이름의 이미지 파일을 여기에 올려 주세요. URL(https://…)을 적었다면 업로드할 필요가 없습니다.</p>
+    <div class="row"><label class="btn sm">🖼 이미지 파일 선택<input type="file" id="imgs" accept="image/*" multiple hidden></label><span class="muted small" id="imgcount"></span></div>
+  </div>
+  <div class="card">
+    <h3>백업 · 초기화</h3>
+    <p class="small muted" style="margin-top:0">데이터는 이 브라우저에만 저장됩니다. 브라우저 데이터를 지우면 사라지니 주기적으로 백업해 두세요. (이미지는 백업에 포함되지 않습니다)</p>
+    <div class="row">
+      <button class="btn sm" onclick="exportBackup()">💾 백업 내보내기(JSON)</button>
+      <label class="btn sm">📂 백업 가져오기<input type="file" id="bk" accept=".json" hidden></label>
+      <button class="btn sm danger" onclick="if(confirm('학습기록과 오답노트를 모두 삭제할까요? 문제은행은 유지됩니다.')){DB.attempts=[];DB.wrong={};saveDB();toast('학습기록을 초기화했습니다');}">학습기록 초기화</button>
+    </div>
+  </div>
+  <details class="card"><summary>업로드 양식 작성 안내</summary>${templateGuideHTML()}</details>`;
+
+  const drop = $('#drop'), file = $('#file');
+  drop.onclick = ()=> file.click();
+  drop.ondragover = e=>{ e.preventDefault(); drop.classList.add('over'); };
+  drop.ondragleave = ()=> drop.classList.remove('over');
+  drop.ondrop = e=>{ e.preventDefault(); drop.classList.remove('over'); if(e.dataTransfer.files[0]) readQuestionFile(e.dataTransfer.files[0]); };
+  file.onchange = ()=>{ if(file.files[0]) readQuestionFile(file.files[0]); file.value=''; };
+  document.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{ const s=b.dataset.del; if(confirm(`'${s}' 과목의 개인 문제를 삭제할까요? (공용 문제는 유지)`)){ DB.questions = DB.questions.filter(q=>q.subject!==s || q.src==='shared'); saveDB(); viewUpload(); } });
+  $('#imgs').onchange = async e=>{ let n=0; for(const f of e.target.files){ try{ await IMG.put(f.name, f); n++; }catch(err){} } toast(`이미지 ${n}개를 저장했습니다`); refreshImgCount(); };
+  $('#bk').onchange = e=>{ const f=e.target.files[0]; if(f) importBackup(f); };
+  refreshImgCount();
+  if(pending) renderPending();
+}
+async function refreshImgCount(){ const k = await IMG.keys(); const el = $('#imgcount'); if(el) el.textContent = `저장된 이미지 ${k.length}개`; }
+
+async function readQuestionFile(f){
+  if(!window.XLSX){ toast('엑셀 처리 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인하세요.'); return; }
+  try{
+    let wb;
+    if(/\.csv$/i.test(f.name)){
+      const buf = await f.arrayBuffer();
+      let txt = new TextDecoder('utf-8').decode(buf);
+      if(txt.includes('�')) txt = new TextDecoder('euc-kr').decode(buf);   // 엑셀 CSV(CP949) 대응
+      wb = XLSX.read(txt.replace(/^﻿/,''), {type:'string', raw:true});
+    } else {
+      wb = XLSX.read(await f.arrayBuffer(), {type:'array'});
+    }
+    const sh = wb.Sheets['문제'] || wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sh, {defval:'', raw:false});
+    pending = await validateRows(rows, f.name);
+    renderPending();
+  }catch(e){ console.error(e); toast('파일을 읽지 못했습니다: '+e.message); }
+}
+
+async function validateRows(rows, fname){
+  const valid = [], errors = [], warnings = [], seen = new Set();
+  const existing = new Set(DB.questions.map(q=>q.id));
+  const imgKeys = new Set(await IMG.keys());
+  let overwrite = 0;
+  rows.forEach((r, i)=>{
+    const line = i+2, o = {};
+    for(const [k,v] of Object.entries(r)){ const key = COLMAP[String(k).replace(/\s/g,'').toLowerCase()]; if(key) o[key] = String(v??'').trim(); }
+    if(!Object.values(o).some(v=>v)) return;                                  // 빈 행
+    const err = m => errors.push(`${line}행: ${m}`), wrn = m => warnings.push(`${line}행: ${m}`);
+    const type = normType(o.type);
+    if(!o.subject) return err('과목이 비어 있습니다');
+    if(!o.unit) return err('대단원이 비어 있습니다');
+    if(!o.text) return err('문제가 비어 있습니다');
+    if(!type) return err(`유형 '${o.type}'을(를) 알 수 없습니다 (객관식/단답형/서술형)`);
+    if(!o.answer) return err(type==='서술형' ? '정답(모범답안)이 비어 있습니다' : '정답이 비어 있습니다');
+    const q = {id:o.id, subject:o.subject, unit:o.unit, subunit:o.subunit||'', type, difficulty:o.difficulty, text:o.text, image:o.image||'',
+               choices:[], answer:o.answer, explanation:o.explanation||'', points:Number(o.points)||(type==='객관식'?2:3), criteria:o.criteria||''};
+    if(!DIFFS.includes(q.difficulty)){ if(o.difficulty) wrn(`난이도 '${o.difficulty}' → '중'으로 처리`); q.difficulty='중'; }
+    if(type==='객관식'){
+      const cs = [o.c1,o.c2,o.c3,o.c4,o.c5]; let last = cs.length; while(last>0 && !cs[last-1]) last--;
+      q.choices = cs.slice(0,last);
+      if(q.choices.length < 2) return err('객관식은 보기가 2개 이상 필요합니다');
+      if(q.choices.some(c=>!c)) return err('보기 중간에 빈 칸이 있습니다');
+      const a = String(q.answer).replace(/[①②③④⑤]/g, c=>CIRCLED.indexOf(c)+1).replace(/[^0-9]/g,'');
+      if(!a || +a<1 || +a>q.choices.length) return err(`정답 '${o.answer}'이(가) 보기 번호(1~${q.choices.length}) 범위를 벗어났습니다`);
+      q.answer = String(+a);
+      if(q.choices.length !== 5) wrn(`보기가 ${q.choices.length}개입니다`);
+    }
+    if(type==='서술형' && !q.criteria) wrn('서술형 채점기준(키워드)이 없어 자동 예비채점이 생략됩니다');
+    if(!q.id){ q.id = `${q.subject}-R${line}`; wrn(`문항ID가 없어 '${q.id}'로 자동 생성`); }
+    if(seen.has(q.id)) wrn(`문항ID '${q.id}' 중복 → 아래쪽 행으로 덮어씀`);
+    if(existing.has(q.id)) overwrite++;
+    if(q.image && !/^(https?:|data:)/i.test(q.image) && !imgKeys.has(q.image)) wrn(`이미지 '${q.image}' 파일이 아직 업로드되지 않았습니다`);
+    seen.add(q.id);
+    const idx = valid.findIndex(v=>v.id===q.id); if(idx>=0) valid[idx]=q; else valid.push(q);
+  });
+  return {fname, valid, errors, warnings, overwrite};
+}
+
+function renderPending(){
+  const p = pending, el = $('#pv'); if(!el) return;
+  if(!p){ el.innerHTML=''; return; }
+  const list = (arr, cls) => arr.slice(0,30).map(m=>`<div class="msg ${cls}">${esc(m)}</div>`).join('') + (arr.length>30?`<div class="small muted">… 외 ${arr.length-30}건</div>`:'');
+  el.innerHTML = `<div style="margin-top:16px">
+    <div class="row"><b>${esc(p.fname)}</b> 검증 결과:
+      <span class="badge b-ok">✅ 정상 ${p.valid.length}</span><span class="badge b-warn">⚠ 경고 ${p.warnings.length}</span><span class="badge b-bad">❌ 오류 ${p.errors.length}</span></div>
+    ${p.errors.length?`<div style="margin-top:8px"><div class="small muted">오류 행은 저장되지 않습니다.</div>${list(p.errors,'err')}</div>`:''}
+    ${p.warnings.length?`<details style="margin-top:8px"><summary>경고 ${p.warnings.length}건 보기</summary>${list(p.warnings,'wrn')}</details>`:''}
+    <div class="row" style="margin-top:12px">
+      <label><input type="radio" name="mode" value="add" checked> 추가 (같은 ID는 덮어쓰기${p.overwrite?` · ${p.overwrite}건`:''})</label>
+      <label><input type="radio" name="mode" value="replace"> 개인 문제 전체 교체</label>
+      <span class="sp"></span>
+      <button class="btn" onclick="pending=null;renderPending()">취소</button>
+      <button class="btn pri" id="commit" ${p.valid.length?'':'disabled'}>${p.valid.length}문항 저장</button>
+    </div></div>`;
+  $('#commit').onclick = ()=>{
+    const mode = document.querySelector('input[name=mode]:checked').value;
+    if(mode==='replace'){ if(!confirm('직접 올린 개인 문제를 모두 지우고 교체할까요? (공용 문제는 유지)')) return; DB.questions = DB.questions.filter(q=>q.src==='shared'); }
+    const map = new Map(DB.questions.map(q=>[q.id,q])); for(const q of p.valid){ delete q.src; map.set(q.id,q); }
+    DB.questions = [...map.values()]; saveDB(); toast(`${p.valid.length}문항을 저장했습니다`); pending = null; viewUpload();
+  };
+}
+
+const HEADERS = ['문항ID','과목','대단원','소단원','유형','난이도','문제','이미지','보기1','보기2','보기3','보기4','보기5','정답','해설','배점','채점기준'];
+function qToRow(q){ return [q.id,q.subject,q.unit,q.subunit,q.type,q.difficulty,q.text,q.image,...[0,1,2,3,4].map(i=>q.choices[i]||''),q.answer,q.explanation,q.points,q.criteria]; }
+function templateGuideHTML(){
+  const g = [['문항ID','○','PHY-001','중복이면 기존 문항을 덮어씁니다. 비우면 자동 생성'],['과목','○','물리학Ⅰ',''],['대단원','○','역학과 에너지','취약영역 분석의 기준 단위'],
+    ['소단원','','운동량과 충격량','세부 분석용'],['유형','○','객관식 / 단답형 / 서술형',''],['난이도','','상 / 중 / 하','비우면 중'],
+    ['문제','○','본문','줄바꿈 가능 · 〈보기〉 줄 아래는 보기 박스로 표시 · 수식은 $...$ (예: $v=\\sqrt{2gh}$)'],['이미지','','phy_001.png 또는 https://…','파일명이면 문제관리에서 이미지 업로드'],
+    ['보기1~보기5','객관식 ○','',''],['정답','○','객관식: 3 / 단답형: 운동량|p','단답형 복수정답은 | 로 구분, 서술형은 모범답안'],['해설','','',''],['배점','','2 / 3',''],['채점기준','','작용, 반작용, 반대 방향','서술형 키워드 (쉼표 구분)']];
+  return `<div class="tbl" style="margin-top:10px"><table><tr><th>열</th><th>필수</th><th>예시</th><th>비고</th></tr>${g.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</table></div>`;
+}
+function downloadTemplate(){
+  if(!window.XLSX) return toast('엑셀 라이브러리를 불러오지 못했습니다');
+  const wb = XLSX.utils.book_new();
+  const ex = SAMPLE.filter(q=>['PHY-001','PHY-003','ETH-004','CHE-003'].includes(q.id));
+  const ws = XLSX.utils.aoa_to_sheet([HEADERS, ...ex.map(qToRow)]);
+  ws['!cols'] = HEADERS.map(h=>({wch: h==='문제'?60: h==='해설'?40: h.startsWith('보기')?14:12}));
+  XLSX.utils.book_append_sheet(wb, ws, '문제');
+  const guide = [['열','필수','예시','비고'],['문항ID','○','PHY-001','중복이면 덮어쓰기, 비우면 자동 생성'],['과목','○','물리학Ⅰ',''],['대단원','○','역학과 에너지','분석 기준 단위'],['소단원','','운동량과 충격량',''],
+    ['유형','○','객관식/단답형/서술형',''],['난이도','','상/중/하','기본 중'],['문제','○','','줄바꿈 가능. 〈보기〉 라는 줄 아래는 보기 박스. 수식은 $...$'],['이미지','','phy_001.png 또는 URL',''],
+    ['보기1~5','객관식 필수','',''],['정답','○','3 / 운동량|p','객관식은 번호, 단답형 복수정답은 |, 서술형은 모범답안'],['해설','','',''],['배점','','2/3',''],['채점기준','','작용, 반작용','서술형 키워드(쉼표 구분)']];
+  const ws2 = XLSX.utils.aoa_to_sheet(guide); ws2['!cols']=[{wch:12},{wch:10},{wch:24},{wch:60}];
+  XLSX.utils.book_append_sheet(wb, ws2, '작성안내');
+  XLSX.writeFile(wb, '탐구문제_업로드양식.xlsx');
+}
+function exportBank(){
+  if(!window.XLSX) return toast('엑셀 라이브러리를 불러오지 못했습니다');
+  const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet([HEADERS, ...DB.questions.map(qToRow)]);
+  XLSX.utils.book_append_sheet(wb, ws, '문제'); XLSX.writeFile(wb, `문제은행_${dayKey(Date.now())}.xlsx`);
+}
+function exportBackup(){
+  const blob = new Blob([JSON.stringify({app:'tamgu-quiz',version:1,exportedAt:new Date().toISOString(),...DB})], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `탐구문제_백업_${dayKey(Date.now())}.json`; a.click();
+}
+async function importBackup(f){
+  try{ const d = JSON.parse(await f.text());
+    if(!Array.isArray(d.questions) || !Array.isArray(d.attempts)) throw new Error('형식이 올바르지 않습니다');
+    if(!confirm(`문항 ${d.questions.length}개, 풀이기록 ${d.attempts.length}건으로 현재 데이터를 교체할까요?`)) return;
+    DB = {questions:d.questions, attempts:d.attempts, wrong:d.wrong||{}, settings:d.settings||null}; saveDB(); toast('백업을 복원했습니다'); viewUpload();
+  }catch(e){ toast('백업 파일을 읽지 못했습니다: '+e.message); }
+}
+function loadSample(toHome){
+  const map = new Map(DB.questions.map(q=>[q.id,q])); SAMPLE.forEach(q=>map.set(q.id, JSON.parse(JSON.stringify(q))));
+  DB.questions = [...map.values()]; saveDB(); toast(`샘플 ${SAMPLE.length}문항을 추가했습니다`); toHome ? go('home') : viewUpload();
+}
+
+/* =========================================================
+   7. 출제 설정 & 랜덤 출제
+   ========================================================= */
+let cfg = null;
+function defaultCfg(subs){ return {subjects:subs.slice(), unitsOff:[], types:TYPES.slice(), diffs:DIFFS.slice(), count:20, limit:0, excludeCorrect:false, weighted:true, shuffle:false}; }
+function viewSetup(){
+  const subs = [...new Set(DB.questions.map(q=>q.subject))];
+  if(!subs.length){ $('#app').innerHTML = `<div class="card empty"><h2>등록된 문제가 없습니다</h2><div class="row" style="justify-content:center"><button class="btn pri" onclick="loadSample(false);go('setup')">샘플 문제 불러오기</button><button class="btn" onclick="go('upload')">문제 업로드</button></div></div>`; return; }
+  cfg = cfg || Object.assign(defaultCfg(subs), DB.settings||{});
+  cfg.subjects = cfg.subjects.filter(s=>subs.includes(s)); if(!cfg.subjects.length) cfg.subjects = subs.slice();
+  const chip = (group,val,on,label) => `<label class="chip ${on?'on':''}"><input type="checkbox" data-g="${group}" value="${esc(val)}" ${on?'checked':''}>${esc(label??val)}</label>`;
+  $('#app').innerHTML = `<h2>출제 설정</h2><div class="card">
+    <div class="field"><label class="t">과목</label><div class="chips">${subs.map(s=>chip('subjects',s,cfg.subjects.includes(s))).join('')}</div></div>
+    <div class="field"><label class="t">단원 <button class="btn sm" id="uall">전체 선택</button> <button class="btn sm" id="unone">전체 해제</button></label><div id="units"></div></div>
+    <div class="field"><label class="t">유형</label><div class="chips">${TYPES.map(t=>chip('types',t,cfg.types.includes(t))).join('')}</div></div>
+    <div class="field"><label class="t">난이도</label><div class="chips">${DIFFS.map(t=>chip('diffs',t,cfg.diffs.includes(t))).join('')}</div></div>
+    <div class="field row"><label class="t" style="margin:0">문항 수</label><input type="number" id="cnt" min="1" max="200" value="${cfg.count}" style="width:90px">
+      <label class="t" style="margin:0 0 0 16px">제한시간</label><select id="lim">${[[0,'없음'],[10,'10분'],[20,'20분'],[30,'30분 (수능 1과목)'],[60,'60분']].map(([v,l])=>`<option value="${v}" ${cfg.limit==v?'selected':''}>${l}</option>`).join('')}</select></div>
+    <div class="field"><label class="t">옵션</label><div class="chips">
+      ${chip('opt','excludeCorrect',cfg.excludeCorrect,'이미 맞힌 문제 제외')}${chip('opt','weighted',cfg.weighted,'취약 단원 가중 출제')}${chip('opt','shuffle',cfg.shuffle,'선택지 순서 섞기')}</div>
+      <div class="hint">취약 단원 가중: 정답률이 낮은 단원의 문제가 더 자주 나옵니다. 선택지 섞기는 '①, ②' 등 번호를 참조하는 보기가 있으면 끄세요.</div></div>
+    <div class="row"><span id="poolinfo" class="muted"></span><span class="sp"></span><button class="btn pri" id="start">시작하기 ▶</button></div></div>`;
+  const renderUnits = ()=>{
+    const units = []; const seen = new Set();
+    for(const q of DB.questions) if(cfg.subjects.includes(q.subject)){ const k=q.subject+'|'+q.unit; if(!seen.has(k)){ seen.add(k); units.push(k); } }
+    $('#units').innerHTML = `<div class="chips">${units.map(k=>chip('units',k,!cfg.unitsOff.includes(k),(cfg.subjects.length>1?k.split('|')[0]+' · ':'')+k.split('|')[1])).join('')}</div>`;
+    bind(); updateInfo();
+  };
+  const updateInfo = ()=>{ const n = buildPool(cfg).length; $('#poolinfo').textContent = `조건에 맞는 문항: ${n}개`; $('#start').disabled = !n; };
+  const bind = ()=> document.querySelectorAll('#app input[type=checkbox]').forEach(cb=>cb.onchange=()=>{
+    const g = cb.dataset.g, v = cb.value; cb.parentElement.classList.toggle('on', cb.checked);
+    if(g==='opt') cfg[v] = cb.checked;
+    else if(g==='units'){ cfg.unitsOff = cfg.unitsOff.filter(x=>x!==v); if(!cb.checked) cfg.unitsOff.push(v); }
+    else { cfg[g] = cfg[g].filter(x=>x!==v); if(cb.checked) cfg[g].push(v); }
+    if(g==='subjects') renderUnits(); else updateInfo();
+  });
+  $('#uall').onclick = ()=>{ cfg.unitsOff=[]; renderUnits(); };
+  $('#unone').onclick = ()=>{ cfg.unitsOff = [...new Set(DB.questions.filter(q=>cfg.subjects.includes(q.subject)).map(q=>q.subject+'|'+q.unit))]; renderUnits(); };
+  $('#cnt').oninput = e=>{ cfg.count = Math.max(1, +e.target.value||1); };
+  $('#lim').onchange = e=>{ cfg.limit = +e.target.value; };
+  $('#start').onclick = ()=>{
+    const pool = buildPool(cfg); const qs = sample(pool, Math.min(cfg.count, pool.length), cfg.weighted);
+    DB.settings = cfg; saveDB();
+    if(pool.length < cfg.count) toast(`조건에 맞는 문항이 ${pool.length}개라 ${pool.length}문항으로 출제합니다`);
+    startSession(qs, {limit:cfg.limit, shuffle:cfg.shuffle, mode:'normal'});
+  };
+  renderUnits();
+}
+function buildPool(c){
+  const correct = new Set(DB.attempts.filter(a=>a.score===1).map(a=>a.qid));
+  return DB.questions.filter(q=>c.subjects.includes(q.subject) && !c.unitsOff.includes(q.subject+'|'+q.unit) && c.types.includes(q.type) && c.diffs.includes(q.difficulty) && !(c.excludeCorrect && correct.has(q.id)));
+}
+/* 가중치 비복원 추출: weight = 0.2 + (1 - 단원 정답률), 기록 없는 단원은 정답률 0.5로 간주 */
+function sample(pool, n, weighted){
+  const acc = weighted ? unitAccMap() : {};
+  const items = pool.map(q=>({q, w: weighted ? 0.2 + (1 - (acc[q.subject+'|'+q.unit] ?? 0.5)) : 1}));
+  const out = [];
+  while(out.length < n && items.length){
+    let r = Math.random() * items.reduce((s,x)=>s+x.w,0), i = 0;
+    for(; i<items.length-1; i++){ r -= items[i].w; if(r <= 0) break; }
+    out.push(items.splice(i,1)[0].q);
+  }
+  return out;
+}
+
+/* =========================================================
+   8. 문제 풀이 세션
+   ========================================================= */
+function startSession(qs, opt){
+  if(!qs.length) return toast('출제할 문제가 없습니다');
+  session = {id:'S'+Date.now().toString(36), items:qs.map(q=>({q, perm: (opt.shuffle && q.type==='객관식') ? shuffle(q.choices.map((_,i)=>i)) : q.choices.map((_,i)=>i), att:null})),
+             idx:0, start:Date.now(), limit:(opt.limit||0)*60000, mode:opt.mode, skipped:0, done:false};
+  clearInterval(timerId);
+  if(session.limit) timerId = setInterval(tick, 1000);
+  current = 'quiz'; go('quiz');
+}
+function startWrongSession(){
+  const ids = openWrong().map(([id])=>id);
+  const qs = shuffle(DB.questions.filter(q=>ids.includes(q.id)));
+  if(!qs.length) return toast('다시 풀 오답이 없습니다');
+  startSession(qs, {limit:0, shuffle:false, mode:'wrong'});
+}
+function tick(){
+  if(!session || session.done){ clearInterval(timerId); return; }
+  const left = session.limit - (Date.now()-session.start), el = $('#timer');
+  if(el){ el.textContent = '⏱ 남은 시간 ' + fmtSec(Math.max(0,left)/1000); el.classList.toggle('low', left < 60000); }
+  if(left <= 0){ toast('제한시간이 끝났습니다'); finishSession(true); }
+}
+
+let qStart = 0, selected = null, phase = 'answer';
+function viewQuiz(){
+  if(!session || session.done) return go('setup');
+  const it = session.items[session.idx], q = it.q, total = session.items.length;
+  qStart = Date.now(); selected = null; phase = 'answer';
+  $('#app').innerHTML = `<div class="card">
+    <div class="qhead"><span class="badge b-pri">${esc(q.subject)}</span><span>${esc(q.unit)}${q.subunit?' › '+esc(q.subunit):''}</span>
+      <span class="badge b-mute">${q.type}</span><span class="badge b-mute">난이도 ${q.difficulty}</span><span class="badge b-mute">${q.points}점</span>
+      <span class="sp"></span>${session.mode==='wrong'?'<span class="badge b-warn">오답 재풀이</span>':''}<b>${session.idx+1} / ${total}</b>
+      ${session.limit?`<span class="timer" id="timer"></span>`:`<span class="muted" id="elapsed"></span>`}</div>
+    <div class="progress"><i style="width:${session.idx/total*100}%"></i></div>
+    <div class="qtext" id="qt"><span class="qnum">${session.idx+1}.</span>${qTextHTML(q.text)}${imgHTML(q)}</div>
+    <div id="ans">${answerAreaHTML(it)}</div>
+    <div id="fb"></div>
+    <div class="row" style="margin-top:16px" id="actions">
+      <button class="btn" id="skip">건너뛰기</button><button class="btn danger sm" id="quit">그만 풀기</button><span class="sp"></span>
+      <button class="btn pri" id="submit" disabled>제출</button></div>
+    <div class="hint">${q.type==='객관식'?'키보드 <span class="kbd">1</span>~<span class="kbd">5</span> 선택, ':''}${q.type==='서술형'?'':'<span class="kbd">Enter</span> 제출 · 다음 문제'}</div></div>`;
+  const root = $('#app'); renderMath(root); hydrateImages(root);
+  if(session.limit) tick();
+  if(q.type==='객관식'){
+    root.querySelectorAll('.choice').forEach(c=>c.onclick=()=>{ if(phase!=='answer') return; selected = +c.dataset.k; root.querySelectorAll('.choice').forEach(x=>x.classList.toggle('sel', x===c)); $('#submit').disabled=false; });
+  } else {
+    const inp = $('#uans'); inp.focus(); inp.oninput = ()=>{ $('#submit').disabled = !inp.value.trim(); };
+  }
+  $('#submit').onclick = submit;
+  $('#skip').onclick = ()=>{ session.skipped++; nextQ(); };
+  $('#quit').onclick = ()=>{ if(confirm('여기서 종료하고 결과를 볼까요?')) finishSession(true); };
+}
+function answerAreaHTML(it){
+  const q = it.q;
+  if(q.type==='객관식') return `<div class="choices">${it.perm.map((orig,k)=>`<div class="choice" data-k="${k}"><span class="no">${CIRCLED[k]}</span><span>${rich(q.choices[orig])}</span></div>`).join('')}</div>`;
+  if(q.type==='단답형') return `<input type="text" class="ans" id="uans" placeholder="답을 입력하세요" autocomplete="off">`;
+  return `<textarea id="uans" placeholder="답안을 서술하세요"></textarea>`;
+}
+document.addEventListener('keydown', e=>{
+  if(current!=='quiz' || !session || session.done) return;
+  const q = session.items[session.idx]?.q; if(!q) return;
+  if(phase==='answer' && q.type==='객관식' && /^[1-8]$/.test(e.key) && document.activeElement.tagName!=='INPUT'){
+    const c = document.querySelector(`.choice[data-k="${+e.key-1}"]`); if(c) c.click();
+  } else if(e.key==='Enter' && !e.isComposing && !(q.type==='서술형' && phase==='answer')){
+    if(phase==='answer'){ const b=$('#submit'); if(b && !b.disabled){ e.preventDefault(); b.click(); } }
+    else if(phase==='done'){ const b=$('#next'); if(b){ e.preventDefault(); b.click(); } }
+  }
+});
+
+/* 채점 */
+function normAns(s){
+  return String(s??'').normalize('NFKC').toLowerCase().replace(/[×✕✖]/g,'x').replace(/\*/g,'x').replace(/[−–—]/g,'-').replace(/\s+/g,'').replace(/[.。,]+$/,'');
+}
+function gradeShort(user, answer){
+  const u = normAns(user); if(!u) return false;
+  return String(answer).split('|').some(a=>{
+    const n = normAns(a); if(!n) return false;
+    if(u===n) return true;
+    const un = Number(u), an = Number(n);
+    return !isNaN(un) && !isNaN(an) && Math.abs(un-an) < 1e-9;
+  });
+}
+function keywordCheck(user, criteria){
+  const kws = String(criteria||'').split(/[,|\n;]/).map(s=>s.trim()).filter(Boolean);
+  const u = normAns(user);
+  return kws.map(k=>({k, hit: u.includes(normAns(k))}));
+}
+function submit(){
+  const it = session.items[session.idx], q = it.q, time = (Date.now()-qStart)/1000;
+  if(q.type==='객관식'){
+    const userOrig = it.perm[selected]+1, ok = String(userOrig)===String(q.answer);
+    const correctK = it.perm.indexOf(+q.answer-1);
+    document.querySelectorAll('.choice').forEach(c=>{ const k=+c.dataset.k; c.classList.add('locked'); c.classList.remove('sel');
+      if(k===correctK) c.classList.add('correct'); else if(k===selected) c.classList.add('wrong'); });
+    record(it, ok?1:0, String(userOrig), time);
+    showFeedback(ok, `내 답: ${CIRCLED[selected]} · 정답: ${CIRCLED[correctK]}`, it);
+  } else if(q.type==='단답형'){
+    const user = $('#uans').value.trim(), ok = gradeShort(user, q.answer);
+    $('#uans').disabled = true;
+    record(it, ok?1:0, user, time);
+    showFeedback(ok, `내 답: ${esc(user)} · 정답: ${q.answer.split('|').map(esc).join(' / ')}`, it, !ok);
+  } else {
+    const user = $('#uans').value.trim(); $('#uans').disabled = true;
+    const kc = keywordCheck(user, q.criteria), hit = kc.filter(x=>x.hit).length, ratio = kc.length ? hit/kc.length : null;
+    const suggest = ratio==null ? null : ratio>=0.7 ? 1 : ratio>=0.4 ? 0.5 : 0;
+    phase = 'grading';
+    $('#actions').innerHTML = '';
+    $('#fb').innerHTML = `<div class="fb neu">
+      <div class="title">📝 모범답안과 비교해 스스로 채점하세요</div>
+      <div><b>모범답안</b><br>${rich(q.answer)}</div>
+      ${kc.length?`<div class="expl"><b>핵심 키워드 자동 점검</b> — ${hit}/${kc.length}개 포함 (예비점수 ${Math.round(ratio*100)}%)<br>
+        ${kc.map(x=>`<span class="badge ${x.hit?'b-ok':'b-bad'}" style="margin:3px 3px 0 0">${x.hit?'✔':'✖'} ${esc(x.k)}</span>`).join('')}</div>`:''}
+      ${q.explanation?`<div class="expl"><b>해설</b><br>${rich(q.explanation)}</div>`:''}
+      <div class="selfgrade">
+        ${[[1,'○ 맞음 (100%)','ok'],[0.5,'△ 부분 (50%)','warn'],[0,'× 틀림 (0%)','bad']].map(([v,l])=>`<button class="btn ${suggest===v?'pri':''}" data-sg="${v}">${l}${suggest===v?' · 추천':''}</button>`).join('')}
+      </div></div>`;
+    renderMath($('#fb'));
+    document.querySelectorAll('[data-sg]').forEach(b=>b.onclick=()=>{
+      const sc = +b.dataset.sg; record(it, sc, user, time);
+      document.querySelectorAll('[data-sg]').forEach(x=>{ x.disabled=true; x.classList.toggle('pri', x===b); });
+      phase = 'done'; addNextButton(it);
+    });
+  }
+}
+function record(it, score, answer, time){
+  const q = it.q;
+  const a = {qid:q.id, subject:q.subject, unit:q.unit, subunit:q.subunit, type:q.type, difficulty:q.difficulty, points:q.points, score, answer, time:Math.round(time), ts:Date.now(), sid:session.id};
+  DB.attempts.push(a); it.att = a;
+  const w = DB.wrong[q.id];
+  if(score < 1){ DB.wrong[q.id] = {count:(w?.count||0)+1, lastTs:a.ts, cleared:false, starred:w?.starred||false}; a._createdWrong = true; }
+  else if(w){ w.cleared = true; }
+  saveDB();
+}
+function showFeedback(ok, line, it, allowAppeal){
+  const q = it.q; phase = 'done';
+  $('#fb').innerHTML = `<div class="fb ${ok?'ok':'bad'}">
+    <div class="title">${ok?'⭕ 정답입니다!':'❌ 오답입니다.'}</div><div>${line}</div>
+    ${q.explanation?`<div class="expl"><b>📖 해설</b><br>${rich(q.explanation)}</div>`:''}
+    <div class="row" style="margin-top:10px">
+      ${allowAppeal?'<button class="btn sm" id="appeal">내 답도 맞아요 (정답 인정)</button>':''}
+      <button class="btn sm" id="star">${DB.wrong[q.id]?.starred?'★ 오답노트 저장됨':'☆ 오답노트에 저장'}</button></div></div>`;
+  renderMath($('#fb'));
+  $('#star').onclick = ()=>{ const w = DB.wrong[q.id] ||= {count:0,lastTs:Date.now(),cleared:false,starred:false}; w.starred = true; w.cleared = false; saveDB(); $('#star').textContent='★ 오답노트 저장됨'; };
+  if(allowAppeal) $('#appeal').onclick = ()=>{
+    const a = it.att; a.score = 1; a.appealed = true; const w = DB.wrong[q.id];
+    if(w){ w.count = Math.max(0, w.count-1); if(w.count===0 && !w.starred) delete DB.wrong[q.id]; else w.cleared = true; }
+    saveDB(); const f = $('#fb .fb'); f.className='fb ok'; f.querySelector('.title').textContent='⭕ 정답으로 인정했습니다'; $('#appeal').remove();
+  };
+  $('#actions').innerHTML = ''; addNextButton(it);
+}
+function addNextButton(){
+  const last = session.idx >= session.items.length-1;
+  $('#actions').innerHTML = `<span class="sp"></span><button class="btn pri" id="next">${last?'결과 보기':'다음 문제 ▶'}</button>`;
+  $('#next').onclick = nextQ; $('#next').focus();
+}
+function nextQ(){ if(session.idx >= session.items.length-1) return finishSession(true); session.idx++; viewQuiz(); window.scrollTo(0,0); }
+function finishSession(show){
+  if(!session) return; session.done = true; session.end = Date.now(); clearInterval(timerId);
+  if(show){ current = 'result'; go('result'); }
+}
+
+/* =========================================================
+   9. 세션 결과
+   ========================================================= */
+function viewResult(){
+  if(!session) return go('home');
+  const done = session.items.filter(i=>i.att), atts = done.map(i=>i.att);
+  const correct = atts.reduce((s,a)=>s+a.score,0), earned = atts.reduce((s,a)=>s+a.score*a.points,0), totalPts = done.reduce((s,i)=>s+i.q.points,0);
+  const units = aggregate(atts, a=>a.subject+'|'+a.unit).sort((a,b)=>a.acc-b.acc);
+  const wrongs = done.filter(i=>i.att.score<1);
+  $('#app').innerHTML = `<h2>세션 결과 ${session.mode==='wrong'?'<span class="badge b-warn">오답 재풀이</span>':''}</h2>
+    <div class="kpis">
+      <div class="kpi"><div class="l">정답</div><div class="v">${+correct.toFixed(1)} / ${done.length}</div></div>
+      <div class="kpi"><div class="l">정답률</div><div class="v">${pct(done.length?correct/done.length:null)}</div></div>
+      <div class="kpi"><div class="l">점수</div><div class="v">${+earned.toFixed(1)} / ${totalPts}</div></div>
+      <div class="kpi"><div class="l">소요 시간</div><div class="v">${fmtSec(((session.end||Date.now())-session.start)/1000)}</div></div>
+      <div class="kpi"><div class="l">건너뜀·미풀이</div><div class="v">${session.items.length-done.length}</div></div>
+    </div>
+    ${units.length?`<div class="card"><h3>이번 세션 단원별 결과</h3><div class="tbl"><table><tr><th>과목</th><th>단원</th><th class="num">문항</th><th class="num">정답률</th><th class="num">평균시간</th></tr>
+      ${units.map(o=>`<tr><td>${esc(o.sample.subject)}</td><td>${esc(o.sample.unit)}</td><td class="num">${o.n}</td><td class="num">${pct(o.acc)}</td><td class="num">${fmtSec(o.avgTime)}</td></tr>`).join('')}</table></div></div>`:''}
+    ${wrongs.length?`<div class="card"><h3>틀린 문제 (${wrongs.length})</h3>${wrongs.map(i=>wrongItemHTML(i.q, i.att)).join('')}</div>`:''}
+    <div class="row" style="justify-content:center">
+      <button class="btn pri" onclick="go('setup')">▶ 새로 풀기</button>
+      <button class="btn" onclick="startWrongSession()" ${openWrong().length?'':'disabled'}>↻ 오답 다시 풀기</button>
+      <button class="btn" onclick="go('analysis')">📊 분석 보기</button></div>`;
+  renderMath($('#app')); hydrateImages($('#app'));
+}
+function wrongItemHTML(q, att){
+  const ans = q.type==='객관식' ? `${CIRCLED[+q.answer-1]} ${esc(q.choices[+q.answer-1])}` : esc(q.answer);
+  const my = att ? (q.type==='객관식' ? CIRCLED[+att.answer-1] : esc(att.answer)) : '';
+  return `<div class="list-q"><div class="small muted">${esc(q.subject)} › ${esc(q.unit)} · ${q.type} · 난이도 ${q.difficulty}</div>
+    <div style="margin:4px 0">${qTextHTML(q.text)}</div>${imgHTML(q)}
+    ${q.type==='객관식'?`<div class="small">${q.choices.map((c,i)=>`${CIRCLED[i]} ${rich(c)}`).join(' &nbsp; ')}</div>`:''}
+    <details style="margin-top:6px"><summary>정답·해설 보기</summary><div style="margin-top:6px">${att?`<div>내 답: ${my}</div>`:''}<div><b>정답:</b> ${ans}</div>${q.explanation?`<div class="expl">${rich(q.explanation)}</div>`:''}</div></details></div>`;
+}
+
+/* =========================================================
+   10. 분석 리포트
+   ========================================================= */
+let anaF = {days:30, subject:'', group:'unit'};
+function viewAnalysis(){
+  const subs = [...new Set(DB.attempts.map(a=>a.subject))];
+  const since = anaF.days ? Date.now() - anaF.days*86400000 : 0;
+  const atts = DB.attempts.filter(a=>a.ts>=since && (!anaF.subject || a.subject===anaF.subject));
+  const head = `<div class="row" style="margin-bottom:14px"><h2 style="margin:0">분석 리포트</h2><span class="sp"></span>
+    <select id="fd">${[[7,'최근 7일'],[30,'최근 30일'],[90,'최근 90일'],[0,'전체 기간']].map(([v,l])=>`<option value="${v}" ${anaF.days==v?'selected':''}>${l}</option>`).join('')}</select>
+    <select id="fs"><option value="">전체 과목</option>${subs.map(s=>`<option ${anaF.subject===s?'selected':''}>${esc(s)}</option>`).join('')}</select></div>`;
+  if(!atts.length){ $('#app').innerHTML = head + `<div class="card empty"><p>선택한 기간에 풀이 기록이 없습니다.</p><button class="btn pri" onclick="go('setup')">문제 풀러 가기</button></div>`; bindAnaFilters(); return; }
+  const n = atts.length, acc = atts.reduce((s,a)=>s+a.score,0)/n, avgT = atts.reduce((s,a)=>s+a.time,0)/n;
+  const bySub = aggregate(atts, a=>a.subject).sort((a,b)=>a.acc-b.acc);
+  const byUnit = aggregate(atts, a=> anaF.group==='sub' ? a.subject+'|'+a.unit+'|'+(a.subunit||'(미지정)') : a.subject+'|'+a.unit).sort((a,b)=>(a.n>=MIN_N?0:1)-(b.n>=MIN_N?0:1) || a.acc-b.acc);
+  const byType = aggregate(atts, a=>a.type), byDiff = aggregate(atts, a=>a.difficulty);
+  const byDay = aggregate(atts, a=>dayKey(a.ts)).sort((a,b)=>a.key<b.key?-1:1);
+  const weak = weakUnits(atts, 3);
+  $('#app').innerHTML = head + `
+    <div class="kpis">
+      <div class="kpi"><div class="l">풀이 문항</div><div class="v">${n}</div></div>
+      <div class="kpi"><div class="l">정답률</div><div class="v">${pct(acc)}</div></div>
+      <div class="kpi"><div class="l">평균 풀이시간</div><div class="v">${fmtSec(avgT)}</div></div>
+      <div class="kpi"><div class="l">취약 단원 수</div><div class="v">${aggregate(atts,a=>a.subject+'|'+a.unit).filter(o=>o.n>=MIN_N&&o.acc<WEAK).length}</div></div>
+    </div>
+    <div class="card"><h3>💡 진단 및 학습 제안</h3><ul style="margin:0;padding-left:20px">${diagnose(atts, weak, avgT).map(s=>`<li>${s}</li>`).join('')}</ul></div>
+    <div class="charts">
+      <div class="card"><h3>${anaF.subject?'단원별':'과목별'} 정답률</h3><div class="chartbox"><canvas id="c1"></canvas></div></div>
+      <div class="card"><h3>일자별 정답률 추이</h3><div class="chartbox"><canvas id="c2"></canvas></div></div>
+    </div>
+    <div class="card"><div class="row"><h3 style="margin:0">단원별 상세</h3><span class="sp"></span>
+      <label class="small"><input type="checkbox" id="grp" ${anaF.group==='sub'?'checked':''}> 소단원까지 보기</label></div>
+      <div class="tbl" style="margin-top:8px"><table><tr><th>과목</th><th>단원</th>${anaF.group==='sub'?'<th>소단원</th>':''}<th class="num">풀이</th><th class="num">정답률</th><th class="num">평균시간</th><th>판정</th></tr>
+      ${byUnit.map(o=>{ const p=o.key.split('|'); return `<tr><td>${esc(p[0])}</td><td>${esc(p[1])}</td>${anaF.group==='sub'?`<td>${esc(p[2])}</td>`:''}<td class="num">${o.n}</td><td class="num">${pct(o.acc)}</td><td class="num">${fmtSec(o.avgTime)}</td><td>${judge(o)}</td></tr>`; }).join('')}</table></div>
+      <div class="hint">판정 기준: 정답률 ${WEAK*100}% 미만 취약 · ${GOOD*100}% 미만 보통 · 이상 양호 (${MIN_N}문항 미만은 표본부족)</div></div>
+    <div class="charts">
+      <div class="card"><h3>유형별</h3>${miniTable(byType, TYPES)}</div>
+      <div class="card"><h3>난이도별</h3>${miniTable(byDiff, DIFFS)}</div>
+    </div>
+    ${!anaF.subject && bySub.length?`<div class="card"><h3>과목별 요약</h3>${miniTable(bySub)}</div>`:''}`;
+  bindAnaFilters();
+  $('#grp').onchange = e=>{ anaF.group = e.target.checked?'sub':'unit'; viewAnalysis(); };
+  drawCharts(anaF.subject ? aggregate(atts, a=>a.unit) : bySub, byDay);
+}
+function bindAnaFilters(){
+  $('#fd').onchange = e=>{ anaF.days = +e.target.value; viewAnalysis(); };
+  $('#fs').onchange = e=>{ anaF.subject = e.target.value; viewAnalysis(); };
+}
+function miniTable(rows, order){
+  if(order) rows = order.map(k=>rows.find(r=>r.key===k)).filter(Boolean);
+  return `<div class="tbl"><table><tr><th>구분</th><th class="num">풀이</th><th class="num">정답률</th><th class="num">평균시간</th><th>판정</th></tr>
+    ${rows.map(o=>`<tr><td>${esc(o.key)}</td><td class="num">${o.n}</td><td class="num">${pct(o.acc)}</td><td class="num">${fmtSec(o.avgTime)}</td><td>${judge(o)}</td></tr>`).join('')}</table></div>`;
+}
+function diagnose(atts, weak, avgT){
+  const out = [];
+  if(!weak.length){
+    const low = aggregate(atts, a=>a.subject+'|'+a.unit).filter(o=>o.n<MIN_N);
+    out.push(`정답률 ${WEAK*100}% 미만인 취약 단원이 없습니다.` + (low.length?` 다만 ${low.length}개 단원은 풀이가 ${MIN_N}문항 미만이라 판정이 보류되었습니다. 더 풀어 보세요.`:''));
+  }
+  for(const w of weak){
+    const ua = atts.filter(a=>a.subject+'|'+a.unit===w.key);
+    const d = aggregate(ua, a=>a.difficulty).sort((a,b)=>a.acc-b.acc)[0];
+    const s = aggregate(ua, a=>a.subunit||null).filter(o=>o.n>=2).sort((a,b)=>a.acc-b.acc)[0];
+    let t = `<b>${esc(w.sample.subject)} › ${esc(w.sample.unit)}</b> 정답률 ${pct(w.acc)} (${w.n}문항).`;
+    if(d && d.acc < w.acc+0.001 && d.n>=2) t += ` 특히 난이도 '${d.key}' 문항 정답률이 ${pct(d.acc)}입니다.`;
+    if(s && s.acc < 0.5) t += ` 소단원 '${esc(s.key)}'(${pct(s.acc)})부터 개념을 다시 정리하세요.`;
+    out.push(t);
+  }
+  const slow = aggregate(atts, a=>a.subject+'|'+a.unit).filter(o=>o.n>=3 && o.avgTime > avgT*1.5 && o.acc >= WEAK);
+  for(const o of slow.slice(0,2)) out.push(`<b>${esc(o.sample.subject)} › ${esc(o.sample.unit)}</b>: 정답률은 ${pct(o.acc)}이지만 평균 ${fmtSec(o.avgTime)}로 전체 평균보다 오래 걸립니다. 시간 단축 연습이 필요합니다.`);
+  const types = aggregate(atts, a=>a.type).filter(o=>o.n>=MIN_N).sort((a,b)=>a.acc-b.acc);
+  if(types.length>1 && types[types.length-1].acc - types[0].acc >= 0.2) out.push(`유형별 편차: '${types[0].key}' 정답률(${pct(types[0].acc)})이 '${types[types.length-1].key}'(${pct(types[types.length-1].acc)})보다 크게 낮습니다.`);
+  const wn = openWrong().length; if(wn) out.push(`해결하지 못한 오답이 ${wn}문항 있습니다. <a href="#" onclick="startWrongSession();return false">오답 다시 풀기</a>로 복습하세요.`);
+  return out;
+}
+function drawCharts(groups, byDay){
+  if(!window.Chart) return;
+  const cs = getComputedStyle(document.documentElement), col = v=>cs.getPropertyValue(v).trim();
+  Chart.defaults.color = col('--muted'); Chart.defaults.borderColor = col('--line'); Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+  const g = groups.slice().sort((a,b)=>a.acc-b.acc);
+  charts.push(new Chart($('#c1'), {type:'bar', data:{labels:g.map(o=>o.key), datasets:[{data:g.map(o=>Math.round(o.acc*100)), backgroundColor:g.map(o=>o.n>=MIN_N && o.acc<WEAK ? col('--bad') : col('--primary')), borderRadius:4, maxBarThickness:28}]},
+    options:{indexAxis:'y', maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>`정답률 ${c.raw}% (${g[c.dataIndex].n}문항)`}}}, scales:{x:{min:0,max:100,ticks:{callback:v=>v+'%'}}, y:{grid:{display:false}}}}}));
+  charts.push(new Chart($('#c2'), {type:'line', data:{labels:byDay.map(o=>o.key.slice(5)), datasets:[{data:byDay.map(o=>Math.round(o.acc*100)), borderColor:col('--primary'), backgroundColor:col('--primary'), tension:.25, pointRadius:3}]},
+    options:{maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>`정답률 ${c.raw}% (${byDay[c.dataIndex].n}문항)`}}}, scales:{y:{min:0,max:100,ticks:{callback:v=>v+'%'}}, x:{grid:{display:false}}}}}));
+}
+
+/* =========================================================
+   11. 오답노트
+   ========================================================= */
+let wrongF = {subject:'', showCleared:false};
+function viewWrong(){
+  const qmap = new Map(DB.questions.map(q=>[q.id,q]));
+  const all = Object.entries(DB.wrong).filter(([id])=>qmap.has(id));
+  const subs = [...new Set(all.map(([id])=>qmap.get(id).subject))];
+  const list = all.filter(([id,w])=>(wrongF.showCleared || !w.cleared) && (!wrongF.subject || qmap.get(id).subject===wrongF.subject))
+                  .sort((a,b)=>b[1].count-a[1].count || b[1].lastTs-a[1].lastTs);
+  const open = openWrong().length;
+  $('#app').innerHTML = `<div class="row" style="margin-bottom:14px"><h2 style="margin:0">오답노트</h2><span class="sp"></span>
+      <select id="ws"><option value="">전체 과목</option>${subs.map(s=>`<option ${wrongF.subject===s?'selected':''}>${esc(s)}</option>`).join('')}</select>
+      <label class="small"><input type="checkbox" id="wc" ${wrongF.showCleared?'checked':''}> 극복한 문제도 보기</label>
+      <button class="btn pri" onclick="startWrongSession()" ${open?'':'disabled'}>↻ 오답 다시 풀기 (${open})</button></div>
+    <div class="card">${list.length ? list.map(([id,w])=>{ const q = qmap.get(id); return `<div class="list-q">
+        <div class="row small"><span class="badge ${w.cleared?'b-ok':'b-bad'}">${w.cleared?'극복':'미해결'}</span>
+          ${w.count?`<span class="badge ${w.count>=2?'b-bad':'b-mute'}">틀린 횟수 ${w.count}</span>`:''}${w.starred?'<span class="badge b-warn">★ 저장</span>':''}
+          <span class="muted">${new Date(w.lastTs).toLocaleDateString('ko-KR')}</span><span class="sp"></span>
+          <button class="btn sm danger" data-rm="${esc(id)}">삭제</button></div>
+        ${wrongItemHTML(q, [...DB.attempts].reverse().find(a=>a.qid===id && a.score<1))}</div>`; }).join('')
+      : '<p class="muted empty">오답노트가 비어 있습니다.</p>'}</div>`;
+  $('#ws').onchange = e=>{ wrongF.subject = e.target.value; viewWrong(); };
+  $('#wc').onchange = e=>{ wrongF.showCleared = e.target.checked; viewWrong(); };
+  document.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{ delete DB.wrong[b.dataset.rm]; saveDB(); viewWrong(); });
+  renderMath($('#app')); hydrateImages($('#app'));
+}
+
+/* =========================================================
+   12. 샘플 문제 (4과목 · 21문항)
+   ========================================================= */
+const SAMPLE = [
+ {id:'PHY-001',subject:'물리학Ⅰ',unit:'역학과 에너지',subunit:'역학적 에너지 보존',type:'객관식',difficulty:'하',points:2,
+  text:'질량이 $2\\,\\mathrm{kg}$인 물체를 높이 $5\\,\\mathrm{m}$인 곳에서 가만히 놓았다. 물체가 지면에 닿기 직전의 속력은? (단, 중력 가속도는 $10\\,\\mathrm{m/s^2}$이고, 공기 저항은 무시한다.)',
+  choices:['5 m/s','10 m/s','15 m/s','20 m/s','25 m/s'],answer:'2',explanation:'역학적 에너지 보존에 의해 $mgh=\\frac{1}{2}mv^2$ 이므로 $v=\\sqrt{2gh}=\\sqrt{2\\times10\\times5}=10\\,\\mathrm{m/s}$ 이다.',criteria:'',image:''},
+ {id:'PHY-002',subject:'물리학Ⅰ',unit:'역학과 에너지',subunit:'운동량과 충격량',type:'객관식',difficulty:'하',points:2,
+  text:'질량 $3\\,\\mathrm{kg}$인 물체가 $4\\,\\mathrm{m/s}$의 속력으로 직선 운동하고 있다. 이 물체의 운동량의 크기는?',
+  choices:['$0.75\\,\\mathrm{kg\\cdot m/s}$','$7\\,\\mathrm{kg\\cdot m/s}$','$12\\,\\mathrm{kg\\cdot m/s}$','$24\\,\\mathrm{kg\\cdot m/s}$','$48\\,\\mathrm{kg\\cdot m/s}$'],answer:'3',
+  explanation:'운동량 $p=mv=3\\times4=12\\,\\mathrm{kg\\cdot m/s}$',criteria:'',image:''},
+ {id:'PHY-003',subject:'물리학Ⅰ',unit:'역학과 에너지',subunit:'운동량과 충격량',type:'단답형',difficulty:'중',points:2,
+  text:'물체가 받은 충격량은 물체의 어떤 물리량의 변화량과 같은지 쓰시오.',choices:[],answer:'운동량|운동량의 변화량|운동량 변화량',
+  explanation:'충격량 $I=F\\Delta t=\\Delta p$ 로, 물체가 받은 충격량은 운동량의 변화량과 같다.',criteria:'',image:''},
+ {id:'PHY-004',subject:'물리학Ⅰ',unit:'파동과 정보 통신',subunit:'전반사와 광통신',type:'객관식',difficulty:'중',points:3,
+  text:'빛의 전반사에 대한 설명으로 옳은 것만을 〈보기〉에서 있는 대로 고른 것은?\n〈보기〉\nㄱ. 빛이 굴절률이 큰 매질에서 작은 매질로 진행할 때 일어날 수 있다.\nㄴ. 입사각이 임계각보다 클 때 일어난다.\nㄷ. 광섬유는 전반사를 이용하여 빛 신호를 전달한다.',
+  choices:['ㄱ','ㄷ','ㄱ, ㄴ','ㄴ, ㄷ','ㄱ, ㄴ, ㄷ'],answer:'5',explanation:'ㄱ, ㄴ: 전반사는 굴절률이 큰 매질 → 작은 매질로 진행하며, 입사각이 임계각보다 클 때 일어난다. ㄷ: 광섬유는 코어(굴절률 큼)와 클래딩 사이의 전반사를 이용한다. 모두 옳다.',criteria:'',image:''},
+ {id:'PHY-005',subject:'물리학Ⅰ',unit:'물질과 전자기장',subunit:'전기 회로',type:'단답형',difficulty:'하',points:2,
+  text:'저항값이 $4\\,\\Omega$인 저항에 $3\\,\\mathrm{A}$의 전류가 흐를 때, 저항 양단의 전압은 몇 V인지 숫자로 쓰시오.',choices:[],answer:'12|12V',
+  explanation:'옴의 법칙 $V=IR=3\\times4=12\\,\\mathrm{V}$',criteria:'',image:''},
+ {id:'PHY-006',subject:'물리학Ⅰ',unit:'역학과 에너지',subunit:'뉴턴 운동 법칙',type:'서술형',difficulty:'중',points:3,
+  text:'뉴턴 운동 제3법칙(작용 반작용 법칙)의 내용을 쓰고, 일상생활의 예를 한 가지 들어 설명하시오.',choices:[],
+  answer:'두 물체가 서로 힘을 주고받을 때, A가 B에 작용하는 힘과 B가 A에 작용하는 힘은 크기가 같고 방향이 반대이며, 두 힘은 서로 다른 물체에 작용한다. 예) 사람이 벽을 밀면 벽도 사람을 같은 크기의 힘으로 반대 방향으로 민다.',
+  explanation:'작용 반작용은 서로 다른 두 물체에 작용하므로 힘의 평형(한 물체에 작용)과 구별해야 한다.',criteria:'작용, 반작용, 크기, 반대, 다른 물체',image:''},
+ {id:'CHE-001',subject:'화학Ⅰ',unit:'화학의 첫걸음',subunit:'몰과 화학식량',type:'객관식',difficulty:'하',points:2,
+  text:'물($\\mathrm{H_2O}$) $18\\,\\mathrm{g}$의 양(mol)은? (단, H, O의 원자량은 각각 1, 16이다.)',
+  choices:['0.5 mol','1 mol','1.5 mol','2 mol','18 mol'],answer:'2',explanation:'$\\mathrm{H_2O}$의 분자량은 $2\\times1+16=18$ 이므로 $18\\,\\mathrm{g}\\div18\\,\\mathrm{g/mol}=1\\,\\mathrm{mol}$',criteria:'',image:''},
+ {id:'CHE-002',subject:'화학Ⅰ',unit:'화학 결합과 분자의 세계',subunit:'분자의 극성',type:'객관식',difficulty:'중',points:2,
+  text:'다음 중 무극성 분자는?',choices:['$\\mathrm{H_2O}$','$\\mathrm{NH_3}$','$\\mathrm{CO_2}$','$\\mathrm{HCl}$','$\\mathrm{HF}$'],answer:'3',
+  explanation:'$\\mathrm{CO_2}$는 C=O 결합은 극성이지만 분자 구조가 직선형(대칭)이어서 쌍극자 모멘트의 합이 0인 무극성 분자이다.',criteria:'',image:''},
+ {id:'CHE-003',subject:'화학Ⅰ',unit:'역동적인 화학 반응',subunit:'pH',type:'단답형',difficulty:'중',points:3,
+  text:'25 ℃에서 pH가 3인 수용액의 $[\\mathrm{H_3O^+}]$는 몇 M인지 쓰시오.',choices:[],answer:'0.001|10^-3|1x10^-3|1×10^-3|10^(-3)|1e-3|0.001M',
+  explanation:'$\\mathrm{pH}=-\\log[\\mathrm{H_3O^+}]$ 이므로 $[\\mathrm{H_3O^+}]=10^{-3}\\,\\mathrm{M}=0.001\\,\\mathrm{M}$',criteria:'',image:''},
+ {id:'CHE-004',subject:'화학Ⅰ',unit:'원자의 세계',subunit:'전자 배치',type:'객관식',difficulty:'하',points:2,
+  text:'바닥상태 나트륨(Na, 원자 번호 11) 원자의 원자가 전자 수는?',choices:['1','2','3','7','8'],answer:'1',
+  explanation:'Na의 전자 배치는 $1s^2\\,2s^2\\,2p^6\\,3s^1$ 이므로 원자가 전자는 1개이다.',criteria:'',image:''},
+ {id:'CHE-005',subject:'화학Ⅰ',unit:'역동적인 화학 반응',subunit:'산화 환원',type:'서술형',difficulty:'상',points:3,
+  text:'산화와 환원을 전자의 이동과 산화수의 변화 관점에서 각각 설명하시오.',choices:[],
+  answer:'산화는 물질이 전자를 잃는 반응으로 산화수가 증가한다. 환원은 물질이 전자를 얻는 반응으로 산화수가 감소한다. 산화와 환원은 항상 동시에 일어난다.',
+  explanation:'전자를 잃음 → 산화(산화수 증가), 전자를 얻음 → 환원(산화수 감소).',criteria:'전자, 잃, 얻, 산화수, 증가, 감소',image:''},
+ {id:'ETH-001',subject:'생활과 윤리',unit:'사회와 윤리',subunit:'분배 정의',type:'객관식',difficulty:'중',points:2,
+  text:'롤스의 정의의 원칙 중, 사회적·경제적 불평등은 사회의 최소 수혜자에게 최대의 이익이 되도록 편성되어야 한다는 원칙은?',
+  choices:['평등한 자유의 원칙','공정한 기회균등의 원칙','차등의 원칙','최대 행복의 원칙','소유 권리의 원칙'],answer:'3',
+  explanation:'롤스의 제2원칙 중 차등의 원칙에 대한 설명이다. 소유 권리(취득·이전·교정)는 노직의 입장이다.',criteria:'',image:''},
+ {id:'ETH-002',subject:'생활과 윤리',unit:'현대의 삶과 실천 윤리',subunit:'공리주의',type:'객관식',difficulty:'하',points:2,
+  text:'쾌락에는 양적 차이뿐만 아니라 질적 차이도 있다고 주장하며, "만족한 돼지보다 불만족한 인간이 낫다"고 말한 사상가는?',
+  choices:['벤담','밀','칸트','롤스','노직'],answer:'2',explanation:'밀은 질적 공리주의를 주장하였다. 벤담은 쾌락의 양적 차이만 인정하였다.',criteria:'',image:''},
+ {id:'ETH-003',subject:'생활과 윤리',unit:'생명과 윤리',subunit:'동물 윤리',type:'단답형',difficulty:'중',points:2,
+  text:'싱어가 주장한 것으로, 쾌고 감수 능력을 지닌 모든 존재의 이익을 동등하게 고려해야 한다는 원칙의 이름을 쓰시오.',choices:[],
+  answer:'이익 평등 고려의 원칙|이익 평등 고려 원칙|이익평등고려의원칙|평등한 이익 고려의 원칙',
+  explanation:'싱어는 이익 평등 고려의 원칙에 따라 동물의 고통도 인간의 고통과 동등하게 고려해야 한다고 보았다.',criteria:'',image:''},
+ {id:'ETH-004',subject:'생활과 윤리',unit:'현대의 삶과 실천 윤리',subunit:'의무론',type:'서술형',difficulty:'상',points:3,
+  text:'칸트가 제시한 정언 명령의 의미를 설명하고, 그 정식(형식) 두 가지를 서술하시오.',choices:[],
+  answer:'정언 명령은 어떤 조건이나 결과와 무관하게 무조건 따라야 하는 도덕 법칙의 명령이다. ① 네 의지의 준칙이 항상 보편적 법칙이 될 수 있도록 행위하라. ② 인격을 항상 목적으로 대하고 결코 단지 수단으로만 대하지 마라.',
+  explanation:'가언 명령(조건부)과 구별되며, 보편화 가능성과 인격 존중이 핵심이다.',criteria:'무조건, 보편, 법칙, 목적, 수단',image:''},
+ {id:'ETH-005',subject:'생활과 윤리',unit:'평화와 공존',subunit:'국제 평화',type:'객관식',difficulty:'중',points:2,
+  text:'영구 평화를 위해 자유로운 국가들의 연맹(평화 연맹)을 결성해야 한다고 주장한 사상가는?',
+  choices:['홉스','칸트','갈퉁','로크','마르크스'],answer:'2',explanation:'칸트는 『영구 평화론』에서 공화 정체, 자유로운 국가들의 연맹, 세계 시민법을 제시하였다.',criteria:'',image:''},
+ {id:'ETH-006',subject:'생활과 윤리',unit:'평화와 공존',subunit:'국제 평화',type:'객관식',difficulty:'상',points:3,
+  text:'갈퉁이 말한 \'적극적 평화\'에 대한 설명으로 옳은 것은?',
+  choices:['전쟁이 없는 상태만을 의미한다.','직접적 폭력이 제거된 상태로 충분하다.','직접적 폭력뿐 아니라 구조적·문화적 폭력까지 제거된 상태이다.','국가 간 세력 균형을 통해서만 달성된다.','개인의 내면적 평화만을 의미한다.'],answer:'3',
+  explanation:'갈퉁은 직접적 폭력이 없는 상태를 소극적 평화, 구조적·문화적 폭력까지 제거된 상태를 적극적 평화라고 하였다.',criteria:'',image:''},
+ {id:'EAR-001',subject:'지구과학Ⅰ',unit:'대기와 해양의 상호 작용',subunit:'엘니뇨와 라니냐',type:'객관식',difficulty:'중',points:3,
+  text:'엘니뇨 시기에 평년과 비교하여 나타나는 현상으로 옳은 것은?',
+  choices:['무역풍이 강해진다.','동태평양 적도 해역의 용승이 강해진다.','동태평양 적도 해역의 표층 수온이 높아진다.','서태평양 적도 해역의 강수량이 증가한다.','동태평양 적도 해역의 해수면 높이가 낮아진다.'],answer:'3',
+  explanation:'엘니뇨 시기에는 무역풍이 약해져 동태평양의 용승이 약해지고 표층 수온이 상승한다. 강수 구역이 동쪽으로 이동하고 동태평양 해수면은 높아진다.',criteria:'',image:''},
+ {id:'EAR-002',subject:'지구과학Ⅰ',unit:'고체 지구',subunit:'판 구조론',type:'단답형',difficulty:'하',points:2,
+  text:'두 판이 서로 멀어지는 판의 경계로, 해령이나 열곡대가 발달하는 경계의 이름을 쓰시오.',choices:[],answer:'발산형 경계|발산형|발산 경계',
+  explanation:'발산형 경계에서는 맨틀 물질이 상승하여 새로운 해양 지각이 생성된다. (예: 대서양 중앙 해령, 동아프리카 열곡대)',criteria:'',image:''},
+ {id:'EAR-003',subject:'지구과학Ⅰ',unit:'우주',subunit:'별의 물리량',type:'객관식',difficulty:'하',points:2,
+  text:'다음 분광형 중 표면 온도가 가장 높은 별의 분광형은?',choices:['M형','K형','G형','A형','O형'],answer:'5',
+  explanation:'분광형은 표면 온도가 높은 순서대로 O-B-A-F-G-K-M 이다.',criteria:'',image:''},
+ {id:'EAR-004',subject:'지구과학Ⅰ',unit:'우주',subunit:'별의 물리량',type:'객관식',difficulty:'상',points:3,
+  text:'별 A와 B가 최대 에너지를 방출하는 파장($\\lambda_{\\max}$)은 각각 $0.5\\,\\mu\\mathrm{m}$, $0.25\\,\\mu\\mathrm{m}$이다. B의 표면 온도는 A의 몇 배인가?',
+  choices:['$\\frac{1}{4}$배','$\\frac{1}{2}$배','1배','2배','4배'],answer:'4',
+  explanation:'빈의 변위 법칙 $\\lambda_{\\max}T=$ 일정 이므로 $T\\propto\\frac{1}{\\lambda_{\\max}}$. 파장이 $\\frac{1}{2}$이면 온도는 2배이다.',criteria:'',image:''}
+];
+
+/* =========================================================
+   13. 공용 문제은행 (웹 호스팅 시 index.html 옆의 questions.xlsx 자동 동기화)
+   - 파일 내용이 바뀌었을 때만 다시 불러옴 (해시 비교)
+   - 공용 문항은 src:'shared'로 표시, 사용자가 직접 올린 개인 문항과 학습기록은 유지
+   ========================================================= */
+const SHARED_FILE = 'questions.xlsx';
+const SHARED_INFO = {available:false, loading:false, error:null};
+function hashBuf(buf){ const b = new Uint8Array(buf); let h = 0x811c9dc5; for(let i=0;i<b.length;i++){ h ^= b[i]; h = Math.imul(h, 0x01000193); } return (h>>>0).toString(16)+'-'+b.length; }
+async function syncSharedBank(force){
+  if(location.protocol==='file:' || !window.XLSX) return;
+  SHARED_INFO.loading = true;
+  try{
+    const res = await fetch(SHARED_FILE, {cache:'no-cache'});
+    if(!res.ok) return;                                   // 공용 파일이 없으면 개인용으로 동작
+    SHARED_INFO.available = true;
+    const buf = await res.arrayBuffer(), hash = hashBuf(buf);
+    const had = DB.questions.filter(q=>q.src==='shared').length;
+    if(!force && hash===DB.sharedHash && had) return;
+    const wb = XLSX.read(buf, {type:'array'});
+    const sh = wb.Sheets['문제'] || wb.Sheets[wb.SheetNames[0]];
+    const {valid, errors} = await validateRows(XLSX.utils.sheet_to_json(sh, {defval:'', raw:false}), SHARED_FILE);
+    if(!valid.length) throw new Error('유효한 문항이 없습니다');
+    valid.forEach(q=>q.src='shared');
+    const ids = new Set(valid.map(q=>q.id));
+    DB.questions = [...valid, ...DB.questions.filter(q=>q.src!=='shared' && !ids.has(q.id))];
+    DB.sharedHash = hash; SHARED_INFO.error = null; saveDB();
+    toast(`공용 문제은행 ${valid.length}문항을 ${had?'업데이트했':'불러왔'}습니다${errors.length?` (오류 ${errors.length}행 제외)`:''}`);
+  }catch(e){ console.warn(e); SHARED_INFO.error = e.message; }
+  finally{
+    SHARED_INFO.loading = false;
+    if(['home','setup','upload'].includes(current)) VIEWS[current]();   // 풀이 중에는 화면을 건드리지 않음
+  }
+}
+
+go('home');
+syncSharedBank(false);
+</script>
+</body>
+</html>
