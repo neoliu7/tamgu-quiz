@@ -118,18 +118,24 @@ input[type=text].ans{width:100%;font-size:17px;padding:12px}
 details summary{cursor:pointer;color:var(--primary)}
 .hint{font-size:13px;color:var(--muted);margin-top:6px}
 .kbd{border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:12px}
+.login{max-width:380px;margin:8vh auto 0}
+.login input[type=text],.login input[type=password]{width:100%;margin-bottom:10px;padding:11px 12px}
+.login .btn{width:100%;justify-content:center;padding:11px}
+[hidden]{display:none!important}
+#userbox{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
 </style>
 </head>
 <body>
 <header><div class="hwrap">
   <div class="logo" onclick="go('home')">📘 탐구 문제풀이</div>
-  <nav id="nav">
+  <nav id="nav" hidden>
     <button data-v="home">홈</button>
     <button data-v="setup">문제풀기</button>
     <button data-v="analysis">분석</button>
     <button data-v="wrong">오답노트</button>
     <button data-v="upload">문제관리</button>
   </nav>
+  <div id="userbox"></div>
 </div></header>
 <main id="app"></main>
 <div class="toast" id="toast"></div>
@@ -139,8 +145,9 @@ details summary{cursor:pointer;color:var(--primary)}
 /* =========================================================
    1. 저장소 (localStorage + IndexedDB 이미지)
    ========================================================= */
-const LS_KEY = 'tamgu_quiz_v1';
-let DB = loadDB();
+const LS_BASE = 'tamgu_quiz_v1';
+let LS_KEY = LS_BASE;                       // 로그인 후 'tamgu_quiz_v1:<아이디>'로 전환 (사용자별 학습기록 분리)
+let DB = {questions:[], attempts:[], wrong:{}, settings:null, sharedHash:null};
 function loadDB(){
   try{ const s = localStorage.getItem(LS_KEY); if(s){ const d = JSON.parse(s); return Object.assign({questions:[],attempts:[],wrong:{},settings:null,sharedHash:null}, d); } }catch(e){}
   return {questions:[], attempts:[], wrong:{}, settings:null};
@@ -196,8 +203,14 @@ async function hydrateImages(el){
     if(/^(https?:|data:)/i.test(k)){ img.src = k; continue; }
     const blob = await IMG.get(k);
     if(blob){ img.src = URL.createObjectURL(blob); continue; }
-    img.onerror = ()=> img.replaceWith(Object.assign(document.createElement('div'),{className:'msg wrn',textContent:`이미지 '${k}'를 찾을 수 없습니다. (images 폴더 또는 문제관리 이미지 업로드 확인)`}));
-    img.src = 'images/' + encodeURIComponent(k);
+    try{
+      const r = await fetch('images/' + encodeURIComponent(k) + '.enc', {cache:'no-cache'}); if(!r.ok) throw new Error();
+      const b = new Uint8Array(await r.arrayBuffer());
+      const plain = await aesDec(AUTH.key, b.subarray(0,12), b.subarray(12));
+      img.src = URL.createObjectURL(new Blob([plain], {type: mimeOf(k)}));
+    }catch(e){
+      img.replaceWith(Object.assign(document.createElement('div'),{className:'msg wrn',textContent:`이미지 '${k}'를 찾을 수 없습니다. (관리자 이미지 게시 여부 확인)`}));
+    }
   }
 }
 function imgHTML(q){ return q.image ? `<img class="qimg" data-img="${esc(q.image)}" alt="문제 이미지">` : ''; }
@@ -238,6 +251,7 @@ const openWrong = () => Object.entries(DB.wrong).filter(([id,w])=>!w.cleared && 
 let current = 'home', session = null, timerId = null, charts = [];
 const VIEWS = {home:viewHome, upload:viewUpload, setup:viewSetup, quiz:viewQuiz, result:viewResult, analysis:viewAnalysis, wrong:viewWrong};
 function go(v){
+  if(!AUTH) return viewLogin();
   if(current==='quiz' && v!=='quiz' && v!=='result' && session && !session.done){
     if(!confirm('풀이 중인 세션을 종료할까요? 지금까지 제출한 답은 저장됩니다.')) return;
     finishSession(false);
@@ -316,7 +330,7 @@ function viewUpload(){
   ${adminCardHTML()}
   <div class="card">
     <h3>문제은행 현황 <span class="muted small">(공용 ${nShared} · 개인 ${nLocal}문항)</span></h3>
-    ${SHARED_INFO.available?`<div class="msg ${SHARED_INFO.error?'err':'wrn'}" style="margin-bottom:10px">🌐 공용 문제은행(<b>${SHARED_FILE}</b>)은 모든 사용자에게 자동 동기화됩니다. ${isAdmin()?'관리자 모드에서는 업로드·삭제가 모든 사용자에게 반영됩니다.':'공용 문제는 관리자만 수정할 수 있습니다.'}${SHARED_INFO.error?' · 최근 동기화 실패: '+esc(SHARED_INFO.error):''}</div>`:''}
+    ${SHARED_INFO.available?`<div class="msg ${SHARED_INFO.error?'err':'wrn'}" style="margin-bottom:10px">🌐 공용 문제은행(🔒 암호화 저장)은 로그인한 모든 사용자에게 자동 동기화됩니다. ${isAdmin()?'관리자 모드에서는 업로드·삭제가 모든 사용자에게 반영됩니다.':'공용 문제는 관리자만 수정할 수 있습니다.'}${SHARED_INFO.error?' · 최근 동기화 실패: '+esc(SHARED_INFO.error):''}</div>`:''}
     ${DB.questions.length ? `<div class="tbl"><table><tr><th>과목</th><th class="num">문항수</th><th class="num">공용</th><th class="num">객관식</th><th class="num">단답형</th><th class="num">서술형</th><th></th></tr>
       ${Object.entries(bySub).map(([s,o])=>`<tr><td>${esc(s)}</td><td class="num">${o.n}</td><td class="num">${o.shared}</td><td class="num">${o['객관식']}</td><td class="num">${o['단답형']}</td><td class="num">${o['서술형']}</td>
       <td class="num">${o.n>o.shared?`<button class="btn sm danger" data-del="${esc(s)}">개인문제 삭제</button>`:''}${isAdmin()&&o.shared?` <button class="btn sm danger" data-delshared="${esc(s)}">공용에서 삭제</button>`:''}</td></tr>`).join('')}</table></div>` : '<p class="muted">등록된 문제가 없습니다.</p>'}
@@ -977,11 +991,11 @@ const SAMPLE = [
    - 파일 내용이 바뀌었을 때만 다시 불러옴 (해시 비교)
    - 공용 문항은 src:'shared'로 표시, 사용자가 직접 올린 개인 문항과 학습기록은 유지
    ========================================================= */
-const SHARED_FILE = 'questions.xlsx';
+const SHARED_FILE = 'bank.enc';
 const SHARED_INFO = {available:false, loading:false, error:null};
 function hashBuf(buf){ const b = new Uint8Array(buf); let h = 0x811c9dc5; for(let i=0;i<b.length;i++){ h ^= b[i]; h = Math.imul(h, 0x01000193); } return (h>>>0).toString(16)+'-'+b.length; }
 async function syncSharedBank(force){
-  if(location.protocol==='file:' || !window.XLSX) return;
+  if(!AUTH || location.protocol==='file:') return;
   SHARED_INFO.loading = true; let changed = false;
   try{
     const res = await fetch(SHARED_FILE, {cache:'no-cache'});
@@ -990,10 +1004,7 @@ async function syncSharedBank(force){
     const buf = await res.arrayBuffer(), hash = hashBuf(buf);
     const had = DB.questions.filter(q=>q.src==='shared').length;
     if(!force && hash===DB.sharedHash && had) return;
-    const wb = XLSX.read(buf, {type:'array'});
-    const sh = wb.Sheets['문제'] || wb.Sheets[wb.SheetNames[0]];
-    const {valid, errors} = await validateRows(XLSX.utils.sheet_to_json(sh, {defval:'', raw:false}), SHARED_FILE);
-    if(!valid.length) throw new Error('유효한 문항이 없습니다');
+    const valid = await decryptBank(buf), errors = [];
     valid.forEach(q=>q.src='shared');
     const ids = new Set(valid.map(q=>q.id));
     DB.questions = [...valid, ...DB.questions.filter(q=>q.src!=='shared' && !ids.has(q.id))];
@@ -1061,36 +1072,39 @@ async function publishShared(mutator, message){
   if(!isAdmin()) throw new Error('관리자 연결이 필요합니다');
   for(let attempt=0; ; attempt++){
     const cur = await ghGetFile(SHARED_FILE);
-    let qs = [];
-    if(cur){ const wb = XLSX.read(cur.buf, {type:'array'}); const sh = wb.Sheets['문제'] || wb.Sheets[wb.SheetNames[0]];
-             qs = (await validateRows(XLSX.utils.sheet_to_json(sh, {defval:'', raw:false}), SHARED_FILE)).valid; }
+    const qs = cur ? await decryptBank(cur.buf) : [];
     const next = mutator(qs).map(q=>{ const c = {...q}; delete c.src; return c; });
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet([HEADERS, ...next.map(qToRow)]);
-    ws['!cols'] = HEADERS.map(h=>({wch: h==='문제'?60: h==='해설'?40: h.startsWith('보기')?14:12}));
-    XLSX.utils.book_append_sheet(wb, ws, '문제');
-    const b64 = XLSX.write(wb, {type:'base64', bookType:'xlsx'});
+    const bytes = await encryptBank(next), b64 = b64e(bytes);
     try{ await ghPutFile(SHARED_FILE, b64, cur?.sha, `[탐구문제] ${message}`); }
     catch(e){ if((e.status===409 || e.status===422) && attempt===0) continue; throw e; }
     // 내 화면에도 즉시 반영 (다음 동기화 때 같은 파일로 인식되도록 해시 저장)
     next.forEach(q=>q.src='shared'); const ids = new Set(next.map(q=>q.id));
     DB.questions = [...next, ...DB.questions.filter(q=>q.src!=='shared' && !ids.has(q.id))];
-    DB.sharedHash = hashBuf(b64ToBuf(b64)); SHARED_INFO.available = true; saveDB();
+    DB.sharedHash = hashBuf(bytes); SHARED_INFO.available = true; saveDB();
     return next.length;
   }
 }
 async function publishImage(f){
-  const path = 'images/' + f.name;
+  const path = 'images/' + f.name + '.enc';
   const meta = await gh(`/contents/${encPath(path)}?ref=${encodeURIComponent(GH.branch)}`, {allow404:true});
   const sha = meta.status===404 ? null : (await meta.json()).sha;
-  await ghPutFile(path, await fileToB64(f), sha, `[탐구문제] 이미지 게시: ${f.name}`);
+  const {iv, ct} = await aesEnc(AUTH.key, new Uint8Array(await f.arrayBuffer()));
+  const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12);
+  await ghPutFile(path, b64e(out), sha, `[탐구문제] 이미지 게시(암호화): ${f.name}`);
 }
 
 function adminCardHTML(){
   if(isAdmin()) return `<div class="card"><div class="row"><h3 style="margin:0">🔐 관리자 모드</h3>
       <span class="badge b-ok">연결됨</span><span class="muted small">${esc(GH.owner)}/${esc(GH.repo)} · ${esc(GH.branch)}${GH.login?' · '+esc(GH.login):''}</span><span class="sp"></span>
       <button class="btn sm" id="ghlogout">연결 해제(토큰 삭제)</button></div>
-    <div class="hint">문제를 업로드하면 '공용 문제은행에 게시'를 선택할 수 있습니다. 게시한 문제는 약 1~2분 후 모든 사용자에게 자동 반영됩니다.</div></div>`;
+    <div class="hint">문제를 업로드하면 '공용 문제은행에 게시'를 선택할 수 있습니다. 게시한 문제는 약 1~2분 후 모든 사용자에게 자동 반영됩니다.</div>
+    <h3 style="margin:18px 0 8px">👥 사용자 관리</h3><div id="userlist" class="small muted">불러오는 중…</div>
+    <div class="row" style="margin-top:10px">
+      <input type="text" id="nu_id" placeholder="아이디 (영문·숫자)" style="width:150px" autocomplete="off">
+      <input type="password" id="nu_pw" placeholder="비밀번호 (8자 이상)" style="width:170px" autocomplete="new-password">
+      <select id="nu_role"><option value="user">일반 사용자</option><option value="admin">관리자</option></select>
+      <button class="btn sm pri" id="nu_add">추가 / 비밀번호 재설정</button></div>
+    <div class="hint">같은 아이디를 입력하면 비밀번호가 재설정됩니다. 변경 사항은 1~2분 후 로그인에 반영됩니다.</div></div>`;
   return `<details class="card" id="admincard"><summary>🔐 관리자 설정 (공용 문제 게시 권한)</summary>
     <p class="small muted">관리자만 사용합니다. GitHub 토큰을 연결하면 이 화면에서 올린 문제를 모든 사용자에게 게시할 수 있습니다. 토큰은 이 브라우저에만 저장되며 저장소에는 올라가지 않습니다.</p>
     <div class="row"><label class="small">계정 <input type="text" id="ghowner" value="${esc(GH.owner)}" style="width:130px"></label>
@@ -1107,6 +1121,7 @@ function adminCardHTML(){
       <div class="hint">공용 PC에서는 '이 기기에서 기억'을 끄세요 (브라우저를 닫으면 토큰이 지워집니다).</div></details></details>`;
 }
 function bindAdminCard(){
+  if(isAdmin()) bindUserAdmin();
   const lo = $('#ghlogout');
   if(lo) lo.onclick = ()=>{ if(!confirm('관리자 연결을 해제하고 이 브라우저에서 토큰을 삭제할까요?')) return; GH.token=''; GH.verified=false; saveGH(); viewUpload(); };
   const vb = $('#ghverify'); if(!vb) return;
@@ -1126,11 +1141,150 @@ function bindAdminCard(){
 
 /* 다른 사용자: 탭으로 돌아올 때 공용 문제 변경 여부 확인 (풀이 중 제외) */
 document.addEventListener('visibilitychange', ()=>{
-  if(document.visibilityState==='visible' && current!=='quiz') syncSharedBank(false);
+  if(AUTH && document.visibilityState==='visible' && current!=='quiz') syncSharedBank(false);
 });
 
-go('home');
-syncSharedBank(false);
+/* =========================================================
+   15. 로그인 · 암호화
+   - 공용 문제은행(bank.enc)과 이미지(images/*.enc)는 AES-256-GCM으로 암호화되어 저장
+   - users.json에는 비밀번호가 저장되지 않음: 각 사용자의 비밀번호(PBKDF2 60만회)로 감싼 '데이터 키'만 저장
+   - 올바른 아이디/비밀번호로만 데이터 키를 풀 수 있어, 저장소가 공개여도 문제 내용은 보호됨
+   ========================================================= */
+const te = new TextEncoder(), td = new TextDecoder();
+const AUTH_KEY = 'tamgu_auth';
+let AUTH = null;                                  // {id, role, raw:Uint8Array, key:CryptoKey}
+function b64e(buf){ const b = buf instanceof Uint8Array ? buf : new Uint8Array(buf); let s = ''; for(let i=0;i<b.length;i+=0x8000) s += String.fromCharCode.apply(null, b.subarray(i,i+0x8000)); return btoa(s); }
+const b64d = s => Uint8Array.from(atob(s), c=>c.charCodeAt(0));
+function mimeOf(k){ const e = String(k).split('.').pop().toLowerCase(); return ({png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif',webp:'image/webp',svg:'image/svg+xml'})[e] || 'application/octet-stream'; }
+async function deriveKEK(pw, salt, iter){
+  const base = await crypto.subtle.importKey('raw', te.encode(pw), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2', salt, iterations:iter, hash:'SHA-256'}, base, {name:'AES-GCM', length:256}, false, ['encrypt','decrypt']);
+}
+async function aesEnc(key, bytes){ const iv = crypto.getRandomValues(new Uint8Array(12)); return {iv, ct: new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, bytes))}; }
+async function aesDec(key, iv, ct){ return new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM', iv}, key, ct)); }
+async function decryptBank(buf){
+  const j = JSON.parse(td.decode(buf));
+  let plain; try{ plain = await aesDec(AUTH.key, b64d(j.iv), b64d(j.ct)); }catch(e){ throw new Error('문제은행 복호화 실패 (데이터 키 불일치)'); }
+  return JSON.parse(td.decode(plain)).questions || [];
+}
+async function encryptBank(qs){
+  const {iv, ct} = await aesEnc(AUTH.key, te.encode(JSON.stringify({v:1, updated:new Date().toISOString(), questions:qs})));
+  return te.encode(JSON.stringify({v:1, alg:'AES-256-GCM', iv:b64e(iv), ct:b64e(ct)}));
+}
+async function wrapFor(pw, iter){
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const {iv, ct} = await aesEnc(await deriveKEK(pw, salt, iter), AUTH.raw);
+  return {salt:b64e(salt), iv:b64e(iv), wk:b64e(ct)};
+}
+async function fetchUsers(){
+  const r = await fetch('users.json', {cache:'no-cache'});
+  if(!r.ok) throw new Error('사용자 정보를 불러오지 못했습니다' + (location.protocol==='file:' ? ' (웹 주소로 접속해 주세요)' : ''));
+  return r.json();
+}
+async function setAuth(id, role, raw, remember){
+  AUTH = {id, role, raw, key: await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt','decrypt'])};
+  try{ sessionStorage.removeItem(AUTH_KEY); localStorage.removeItem(AUTH_KEY);
+       if(remember!=null) (remember ? localStorage : sessionStorage).setItem(AUTH_KEY, JSON.stringify({id, role, k:b64e(raw)})); }catch(e){}
+}
+async function login(id, pw, remember){
+  id = id.trim().toLowerCase();
+  const U = await fetchUsers(), u = U.users?.[id];
+  const fail = new Error('아이디 또는 비밀번호가 올바르지 않습니다');
+  if(!u) { await deriveKEK(pw, new Uint8Array(16), U.iter); throw fail; }   // 응답시간으로 아이디 존재 여부가 드러나지 않도록
+  let raw; try{ raw = await aesDec(await deriveKEK(pw, b64d(u.salt), U.iter), b64d(u.iv), b64d(u.wk)); }catch(e){ throw fail; }
+  await setAuth(id, u.role||'user', raw, remember);
+}
+async function restoreAuth(){
+  try{ const s = sessionStorage.getItem(AUTH_KEY) || localStorage.getItem(AUTH_KEY); if(!s) return false;
+       const j = JSON.parse(s); await setAuth(j.id, j.role, b64d(j.k), null); return true; }catch(e){ return false; }
+}
+function enterApp(){
+  LS_KEY = LS_BASE + ':' + AUTH.id;
+  try{ // 로그인 기능 이전의 기록을 첫 로그인 사용자에게 이관 (공용 문제는 다시 받음)
+    if(!localStorage.getItem(LS_KEY) && localStorage.getItem(LS_BASE)){
+      const d = JSON.parse(localStorage.getItem(LS_BASE)); d.questions = (d.questions||[]).filter(q=>q.src!=='shared'); d.sharedHash = null;
+      localStorage.setItem(LS_KEY, JSON.stringify(d)); localStorage.removeItem(LS_BASE);
+    }
+  }catch(e){}
+  DB = loadDB(); cfg = null; session = null; syncSharedBank._once = false;
+  $('#nav').hidden = false;
+  $('#userbox').innerHTML = `<span>👤 <b>${esc(AUTH.id)}</b>${AUTH.role==='admin'?' <span class="badge b-pri">관리자</span>':''}</span><button class="btn sm" id="logout">로그아웃</button>`;
+  $('#logout').onclick = logout;
+  current = 'home'; go('home'); syncSharedBank(false);
+}
+function logout(){
+  if(current==='quiz' && session && !session.done && !confirm('풀이 중인 세션을 종료하고 로그아웃할까요?')) return;
+  clearInterval(timerId); session = null;
+  try{ sessionStorage.removeItem(AUTH_KEY); localStorage.removeItem(AUTH_KEY); }catch(e){}
+  AUTH = null; DB = {questions:[], attempts:[], wrong:{}, settings:null, sharedHash:null}; current = 'login';
+  viewLogin();
+}
+function viewLogin(){
+  $('#nav').hidden = true; $('#userbox').innerHTML = ''; current = 'login';
+  $('#app').innerHTML = `<form class="card login" id="lf">
+    <h2 style="text-align:center">📘 탐구 문제풀이</h2>
+    <p class="muted small" style="text-align:center;margin-top:-6px">로그인한 사용자만 이용할 수 있습니다.</p>
+    <input type="text" id="lid" placeholder="아이디" autocomplete="username" autocapitalize="off" required>
+    <input type="password" id="lpw" placeholder="비밀번호" autocomplete="current-password" required>
+    <label class="small" style="display:block;margin-bottom:12px"><input type="checkbox" id="lrem"> 로그인 상태 유지 (개인 기기에서만)</label>
+    <button class="btn pri" id="lbtn">로그인</button>
+    <div id="lerr" class="msg err" style="display:none;margin-top:10px"></div></form>`;
+  $('#lid').focus();
+  $('#lf').onsubmit = async e=>{
+    e.preventDefault(); const btn = $('#lbtn'), err = $('#lerr');
+    btn.disabled = true; btn.textContent = '확인 중…'; err.style.display = 'none';
+    try{ await login($('#lid').value, $('#lpw').value, $('#lrem').checked); enterApp(); }
+    catch(x){ err.textContent = x.message; err.style.display = 'block'; btn.disabled = false; btn.textContent = '로그인'; $('#lpw').select(); }
+  };
+}
+
+/* 관리자: 사용자 추가 · 비밀번호 재설정 · 삭제 (users.json 커밋) */
+async function editUsers(mutate, message){
+  for(let attempt=0; ; attempt++){
+    const cur = await ghGetFile('users.json');
+    const U = cur ? JSON.parse(td.decode(cur.buf)) : {v:1, kdf:'PBKDF2-SHA256', iter:600000, users:{}};
+    await mutate(U);
+    try{ await ghPutFile('users.json', b64e(te.encode(JSON.stringify(U, null, 2))), cur?.sha, `[탐구문제] ${message}`); return U; }
+    catch(e){ if((e.status===409 || e.status===422) && attempt===0) continue; throw e; }
+  }
+}
+async function renderUserList(){
+  const el = $('#userlist'); if(!el) return;
+  try{
+    const cur = await ghGetFile('users.json'); const U = cur ? JSON.parse(td.decode(cur.buf)) : {users:{}};
+    const ids = Object.keys(U.users);
+    el.innerHTML = `<div class="tbl"><table><tr><th>아이디</th><th>권한</th><th>등록일</th><th></th></tr>${ids.map(id=>`<tr><td>${esc(id)}${id===AUTH.id?' <span class="badge b-mute">나</span>':''}</td>
+      <td>${U.users[id].role==='admin'?'관리자':'일반'}</td><td>${esc((U.users[id].updated||U.users[id].created||'').slice(0,10))}</td>
+      <td class="num">${id===AUTH.id?'':`<button class="btn sm danger" data-deluser="${esc(id)}">삭제</button>`}</td></tr>`).join('')}</table></div>`;
+    el.querySelectorAll('[data-deluser]').forEach(b=>b.onclick=async()=>{
+      const id = b.dataset.deluser; if(!confirm(`사용자 '${id}'를 삭제할까요?`)) return;
+      b.disabled = true;
+      try{ await editUsers(U=>{ delete U.users[id]; }, `사용자 삭제: ${id}`); toast(`'${id}' 삭제 완료 (1~2분 후 반영)`, 5000); renderUserList(); }
+      catch(e){ toast('삭제 실패: '+e.message, 6000); b.disabled = false; }
+    });
+  }catch(e){ el.textContent = '사용자 목록을 불러오지 못했습니다: ' + e.message; }
+}
+function bindUserAdmin(){
+  renderUserList();
+  const add = $('#nu_add'); if(!add) return;
+  add.onclick = async ()=>{
+    const id = $('#nu_id').value.trim().toLowerCase(), pw = $('#nu_pw').value, role = $('#nu_role').value;
+    if(!/^[a-z0-9._-]{3,30}$/.test(id)) return toast('아이디는 영문 소문자·숫자 3~30자로 입력하세요');
+    if(pw.length < 8) return toast('비밀번호는 8자 이상으로 입력하세요');
+    add.disabled = true; add.textContent = '처리 중…';
+    try{
+      let existed = false;
+      await editUsers(async U=>{ existed = !!U.users[id];
+        U.users[id] = {role, ...(await wrapFor(pw, U.iter)), created: U.users[id]?.created || new Date().toISOString(), updated: new Date().toISOString()}; },
+        `사용자 추가/비밀번호 변경: ${id}`);
+      toast(`'${id}' ${existed?'비밀번호를 재설정':'사용자를 추가'}했습니다 (1~2분 후 로그인 가능)`, 6000);
+      $('#nu_id').value = ''; $('#nu_pw').value = ''; renderUserList();
+    }catch(e){ toast('실패: '+e.message, 6000); }
+    add.disabled = false; add.textContent = '추가 / 비밀번호 재설정';
+  };
+}
+
+(async ()=>{ if(await restoreAuth()) enterApp(); else viewLogin(); })();
 </script>
 </body>
 </html>

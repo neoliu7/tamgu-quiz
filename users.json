@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "kdf": "PBKDF2-SHA256",
+  "iter": 600000,
+  "users": {
+    "sjliu": {
+      "role": "admin",
+      "salt": "EAyD3VW44YQLcmQJRZM49g==",
+      "iv": "WH66Sxfqh73OJrpC",
+      "wk": "3bfc6vYBpC6RNuNXM1oB2zxQKnXd1NUjKsVfqO8rGRMsx/ivlebJVqVGTmrUiT8+",
+      "created": "2026-11-05T12:00:18.579Z",
+      "updated": "2026-11-05T12:00:18.579Z"
+    }
+  }
+}
