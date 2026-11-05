@@ -282,7 +282,11 @@ function viewHome(){
   const acc = atts.length ? atts.reduce((s,a)=>s+a.score,0)/atts.length : null;
   const weak = weakUnits(atts);
   const wn = openWrong().length;
-  $('#app').innerHTML = `
+  const nLocalQ = DB.questions.filter(q=>q.src!=='shared').length;
+  const pubBanner = AUTH.role==='admin' && nLocalQ ? `<div class="card" style="border-color:var(--warn);background:var(--warn-weak)"><div class="row">
+      <span>⚠ <b>이 기기에만 있는 문제 ${nLocalQ}개</b>가 있습니다. 다른 기기·사용자에게는 보이지 않습니다.</span><span class="sp"></span>
+      <button class="btn sm pri" onclick="go('upload')">${isAdmin()?'공용으로 게시하기':'게시 권한 연결하기'}</button></div></div>` : '';
+  $('#app').innerHTML = `${pubBanner}
     <div class="kpis">
       <div class="kpi"><div class="l">문제은행</div><div class="v">${nQ}</div></div>
       <div class="kpi"><div class="l">누적 풀이</div><div class="v">${atts.length}</div></div>
@@ -327,7 +331,7 @@ function viewUpload(){
     <div class="drop" id="drop" style="margin-top:12px">📄 파일을 끌어다 놓거나 클릭하세요 (xlsx · xls · csv)<input type="file" id="file" accept=".xlsx,.xls,.csv" hidden></div>
     <div id="pv"></div>
   </div>
-  ${adminCardHTML()}
+  ${AUTH.role==='admin' ? adminCardHTML() : ''}
   <div class="card">
     <h3>문제은행 현황 <span class="muted small">(공용 ${nShared} · 개인 ${nLocal}문항)</span></h3>
     ${SHARED_INFO.available?`<div class="msg ${SHARED_INFO.error?'err':'wrn'}" style="margin-bottom:10px">🌐 공용 문제은행(🔒 암호화 저장)은 로그인한 모든 사용자에게 자동 동기화됩니다. ${isAdmin()?'관리자 모드에서는 업로드·삭제가 모든 사용자에게 반영됩니다.':'공용 문제는 관리자만 수정할 수 있습니다.'}${SHARED_INFO.error?' · 최근 동기화 실패: '+esc(SHARED_INFO.error):''}</div>`:''}
@@ -335,6 +339,7 @@ function viewUpload(){
       ${Object.entries(bySub).map(([s,o])=>`<tr><td>${esc(s)}</td><td class="num">${o.n}</td><td class="num">${o.shared}</td><td class="num">${o['객관식']}</td><td class="num">${o['단답형']}</td><td class="num">${o['서술형']}</td>
       <td class="num">${o.n>o.shared?`<button class="btn sm danger" data-del="${esc(s)}">개인문제 삭제</button>`:''}${isAdmin()&&o.shared?` <button class="btn sm danger" data-delshared="${esc(s)}">공용에서 삭제</button>`:''}</td></tr>`).join('')}</table></div>` : '<p class="muted">등록된 문제가 없습니다.</p>'}
     <div class="row" style="margin-top:12px">
+      ${isAdmin() && nLocal ? `<button class="btn sm pri" id="publocal">📤 이 기기의 개인 문제 ${nLocal}개를 공용으로 게시</button>` : ''}
       ${SHARED_INFO.available?'<button class="btn sm" onclick="syncSharedBank(true)">🌐 공용 문제은행 다시 불러오기</button>':''}
       <button class="btn sm" onclick="loadSample(false)">샘플 문제 추가</button>
       <button class="btn sm" onclick="exportBank()" ${DB.questions.length?'':'disabled'}>문제은행 xlsx로 내보내기</button>
@@ -382,6 +387,15 @@ function viewUpload(){
     catch(err){ toast('삭제 실패: '+err.message, 6000); b.disabled=false; b.textContent='공용에서 삭제'; }
   });
   bindAdminCard();
+  const pl = $('#publocal');
+  if(pl) pl.onclick = async ()=>{
+    const local = DB.questions.filter(q=>q.src!=='shared');
+    if(!confirm(`이 기기에만 저장된 문제 ${local.length}개를 공용 문제은행에 게시합니다. 모든 기기·사용자에게 보이게 됩니다. 계속할까요?`)) return;
+    pl.disabled = true; pl.textContent = '게시 중…';
+    try{ const n = await publishShared(cur=>{ const m = new Map(cur.map(q=>[q.id,q])); local.forEach(q=>m.set(q.id,q)); return [...m.values()]; }, `개인 문제 공용 게시 (${local.length}문항)`);
+         toast(`공용으로 게시했습니다 (총 ${n}문항). 다른 기기에서는 1~2분 후 새로고침하면 보입니다`, 7000); viewUpload(); }
+    catch(e){ toast('게시 실패: '+e.message, 8000); pl.disabled = false; pl.textContent = '📤 개인 문제 공용 게시'; }
+  };
   $('#bk').onchange = e=>{ const f=e.target.files[0]; if(f) importBackup(f); };
   refreshImgCount();
   if(pending) renderPending();
@@ -456,6 +470,7 @@ function renderPending(){
       <span class="badge b-ok">✅ 정상 ${p.valid.length}</span><span class="badge b-warn">⚠ 경고 ${p.warnings.length}</span><span class="badge b-bad">❌ 오류 ${p.errors.length}</span></div>
     ${p.errors.length?`<div style="margin-top:8px"><div class="small muted">오류 행은 저장되지 않습니다.</div>${list(p.errors,'err')}</div>`:''}
     ${p.warnings.length?`<details style="margin-top:8px"><summary>경고 ${p.warnings.length}건 보기</summary>${list(p.warnings,'wrn')}</details>`:''}
+    ${!isAdmin()?`<div class="msg wrn" style="margin-top:12px">⚠ 이 기기(브라우저)에만 저장됩니다. 다른 기기나 다른 사용자에게는 보이지 않습니다.${AUTH.role==='admin'?' 모든 기기에 보이게 하려면 아래 <b>🔐 관리자 설정</b>에서 게시 권한을 먼저 연결하세요 (최초 1회).':''}</div>`:''}
     ${isAdmin()?`<div class="row" style="margin-top:12px"><b>저장 위치</b>
       <label><input type="radio" name="target" value="shared" checked> 🌐 공용 문제은행에 게시 (모든 사용자)</label>
       <label><input type="radio" name="target" value="local"> 내 브라우저에만 저장</label></div>`:''}
@@ -484,7 +499,7 @@ function renderPending(){
     }
     if(mode==='replace'){ if(!confirm('직접 올린 개인 문제를 모두 지우고 교체할까요? (공용 문제는 유지)')) return; DB.questions = DB.questions.filter(q=>q.src==='shared'); }
     const map = new Map(DB.questions.map(q=>[q.id,q])); for(const q of p.valid){ delete q.src; map.set(q.id,q); }
-    DB.questions = [...map.values()]; saveDB(); toast(`${p.valid.length}문항을 저장했습니다`); pending = null; viewUpload();
+    DB.questions = [...map.values()]; saveDB(); toast(`${p.valid.length}문항을 이 기기에만 저장했습니다`, 4000); pending = null; viewUpload();
   };
 }
 
@@ -1095,8 +1110,13 @@ async function publishImage(f){
 
 function adminCardHTML(){
   if(isAdmin()) return `<div class="card"><div class="row"><h3 style="margin:0">🔐 관리자 모드</h3>
-      <span class="badge b-ok">연결됨</span><span class="muted small">${esc(GH.owner)}/${esc(GH.repo)} · ${esc(GH.branch)}${GH.login?' · '+esc(GH.login):''}</span><span class="sp"></span>
-      <button class="btn sm" id="ghlogout">연결 해제(토큰 삭제)</button></div>
+      <span class="badge b-ok">게시 권한 연결됨</span><span class="muted small">${esc(GH.owner)}/${esc(GH.repo)} · ${esc(GH.branch)}</span><span class="sp"></span>
+      <button class="btn sm" id="ghlogout">연결 해제</button></div>
+    <div class="row small" style="margin-top:8px">${GH.inAccount
+      ? '<span class="badge b-ok">✔ 모든 기기 자동 연결</span><span class="muted">이 계정으로 로그인하면 PC·패드·휴대폰 어디서든 바로 게시할 수 있습니다.</span>'
+      : `<span class="badge b-warn">이 기기만 연결됨</span><span class="muted">다른 기기에서도 쓰려면 →</span>
+         ${AUTH.kek?'':'<input type="password" id="acpw" placeholder="내 계정 비밀번호" style="width:150px" autocomplete="current-password">'}
+         <button class="btn sm pri" id="acsave">모든 기기에 자동 연결</button>`}</div>
     <div class="hint">문제를 업로드하면 '공용 문제은행에 게시'를 선택할 수 있습니다. 게시한 문제는 약 1~2분 후 모든 사용자에게 자동 반영됩니다.</div>
     <h3 style="margin:18px 0 8px">👥 사용자 관리</h3><div id="userlist" class="small muted">불러오는 중…</div>
     <div class="row" style="margin-top:10px">
@@ -1106,35 +1126,51 @@ function adminCardHTML(){
       <button class="btn sm pri" id="nu_add">추가 / 비밀번호 재설정</button></div>
     <div class="hint">같은 아이디를 입력하면 비밀번호가 재설정됩니다. 변경 사항은 1~2분 후 로그인에 반영됩니다.</div></div>`;
   return `<details class="card" id="admincard"><summary>🔐 관리자 설정 (공용 문제 게시 권한)</summary>
-    <p class="small muted">관리자만 사용합니다. GitHub 토큰을 연결하면 이 화면에서 올린 문제를 모든 사용자에게 게시할 수 있습니다. 토큰은 이 브라우저에만 저장되며 저장소에는 올라가지 않습니다.</p>
+    <p class="small muted">최초 1회만 설정합니다. GitHub 토큰을 연결하면 업로드한 문제가 모든 기기·사용자에게 보이도록 게시됩니다. 토큰은 내 계정 비밀번호로 암호화되어 저장되므로, 이후에는 어느 기기에서든 로그인만 하면 자동으로 연결됩니다.</p>
     <div class="row"><label class="small">계정 <input type="text" id="ghowner" value="${esc(GH.owner)}" style="width:130px"></label>
       <label class="small">저장소 <input type="text" id="ghrepo" value="${esc(GH.repo)}" style="width:150px"></label>
       <label class="small">브랜치 <input type="text" id="ghbranch" value="${esc(GH.branch)}" style="width:90px"></label></div>
     <div class="row" style="margin-top:8px"><input type="password" id="ghtoken" placeholder="GitHub 토큰 (github_pat_…)" style="flex:1;min-width:220px" autocomplete="off">
-      <label class="small"><input type="checkbox" id="ghremember"> 이 기기에서 기억</label>
+      ${AUTH.kek?'':'<input type="password" id="ghacpw" placeholder="내 계정 비밀번호" style="width:150px" autocomplete="current-password">'}
       <button class="btn sm pri" id="ghverify">연결 확인</button></div>
+    <label class="small" style="display:block;margin-top:6px"><input type="checkbox" id="ghaccount" checked> 모든 기기에서 자동 연결 (내 계정에 암호화 저장, 권장)</label>
     <details style="margin-top:10px"><summary class="small">토큰 발급 방법 (최초 1회)</summary><ol class="small" style="margin:6px 0 0;padding-left:20px">
       <li>GitHub → 우측 상단 프로필 → <b>Settings → Developer settings → Personal access tokens → Fine-grained tokens</b> → <b>Generate new token</b></li>
       <li>Expiration: 90일 권장 · Repository access: <b>Only select repositories</b> → <b>${esc(GH.repo||'tamgu-quiz')}</b></li>
       <li>Permissions → Repository permissions → <b>Contents: Read and write</b> → Generate token</li>
       <li>생성된 토큰(github_pat_…)을 복사해 위 칸에 붙여넣고 [연결 확인]</li></ol>
-      <div class="hint">공용 PC에서는 '이 기기에서 기억'을 끄세요 (브라우저를 닫으면 토큰이 지워집니다).</div></details></details>`;
+      <div class="hint">토큰은 이 저장소(파일 쓰기)로만 권한을 한정하세요. 공용 PC에서는 로그인 시 '로그인 상태 유지'를 끄세요.</div></details></details>`;
 }
 function bindAdminCard(){
   if(isAdmin()) bindUserAdmin();
   const lo = $('#ghlogout');
-  if(lo) lo.onclick = ()=>{ if(!confirm('관리자 연결을 해제하고 이 브라우저에서 토큰을 삭제할까요?')) return; GH.token=''; GH.verified=false; saveGH(); viewUpload(); };
+  if(lo) lo.onclick = async ()=>{
+    if(!confirm(GH.inAccount ? '게시 권한 연결을 해제할까요? 계정에 저장된 토큰도 삭제되어 모든 기기에서 해제됩니다.' : '이 기기의 게시 권한 연결을 해제할까요?')) return;
+    if(GH.inAccount){ try{ await editUsers(U=>{ if(U.users[AUTH.id]) delete U.users[AUTH.id].gt; }, `게시 권한 계정 해제: ${AUTH.id}`); }catch(e){ toast('계정 토큰 삭제 실패: '+e.message, 6000); } }
+    GH.token=''; GH.verified=false; GH.inAccount=false; saveGH(); viewUpload();
+  };
+  const ac = $('#acsave');
+  if(ac) ac.onclick = async ()=>{
+    ac.disabled = true; ac.textContent = '저장 중…';
+    try{ await saveTokenToAccount($('#acpw')?.value); toast('모든 기기 자동 연결을 설정했습니다', 5000); viewUpload(); }
+    catch(e){ toast('실패: '+e.message, 6000); ac.disabled = false; ac.textContent = '모든 기기에 자동 연결'; }
+  };
   const vb = $('#ghverify'); if(!vb) return;
   vb.onclick = async ()=>{
     GH.owner = $('#ghowner').value.trim(); GH.repo = $('#ghrepo').value.trim(); GH.branch = $('#ghbranch').value.trim() || 'main';
-    GH.token = $('#ghtoken').value.trim(); GH.remember = $('#ghremember').checked; GH.verified = false;
+    GH.token = $('#ghtoken').value.trim(); GH.verified = false; GH.inAccount = false;
+    try{ GH.remember = !!localStorage.getItem(AUTH_KEY); }catch(e){}
+    const toAccount = $('#ghaccount').checked, acpw = $('#ghacpw')?.value;
+    if(toAccount && !AUTH.kek && !acpw) return toast('모든 기기 자동 연결을 위해 내 계정 비밀번호를 입력하세요');
     if(!GH.owner || !GH.repo || !GH.token) return toast('계정, 저장소, 토큰을 모두 입력하세요');
     vb.disabled = true; vb.textContent = '확인 중…';
     try{
       const j = await (await gh('')).json();
       if(j.permissions && !j.permissions.push) throw new Error('이 계정에 저장소 쓰기 권한이 없습니다');
       GH.login = j.owner?.login || ''; GH.verified = true; saveGH();
-      toast('관리자 연결 완료. 이제 업로드한 문제를 공용으로 게시할 수 있습니다', 5000); viewUpload();
+      let msg = '게시 권한 연결 완료. 이제 업로드한 문제를 공용으로 게시할 수 있습니다';
+      if(toAccount){ try{ await saveTokenToAccount(acpw); msg += ' (모든 기기 자동 연결 설정됨)'; }catch(e){ msg += ' · 모든 기기 연결 실패: ' + e.message; } }
+      toast(msg, 7000); viewUpload();
     }catch(e){ GH.token=''; toast('연결 실패: '+e.message, 8000); vb.disabled = false; vb.textContent = '연결 확인'; }
   };
 }
@@ -1171,10 +1207,12 @@ async function encryptBank(qs){
   const {iv, ct} = await aesEnc(AUTH.key, te.encode(JSON.stringify({v:1, updated:new Date().toISOString(), questions:qs})));
   return te.encode(JSON.stringify({v:1, alg:'AES-256-GCM', iv:b64e(iv), ct:b64e(ct)}));
 }
-async function wrapFor(pw, iter){
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const {iv, ct} = await aesEnc(await deriveKEK(pw, salt, iter), AUTH.raw);
-  return {salt:b64e(salt), iv:b64e(iv), wk:b64e(ct)};
+async function wrapFor(pw, iter, keepToken){
+  const salt = crypto.getRandomValues(new Uint8Array(16)), kek = await deriveKEK(pw, salt, iter);
+  const {iv, ct} = await aesEnc(kek, AUTH.raw);
+  const out = {salt:b64e(salt), iv:b64e(iv), wk:b64e(ct)};
+  if(keepToken && GH.token){ const t = await aesEnc(kek, te.encode(GH.token)); out.gt = {owner:GH.owner, repo:GH.repo, branch:GH.branch, iv:b64e(t.iv), ct:b64e(t.ct), saved:new Date().toISOString()}; }
+  return {entry:out, kek};
 }
 async function fetchUsers(){
   const r = await fetch('users.json', {cache:'no-cache'});
@@ -1191,8 +1229,35 @@ async function login(id, pw, remember){
   const U = await fetchUsers(), u = U.users?.[id];
   const fail = new Error('아이디 또는 비밀번호가 올바르지 않습니다');
   if(!u) { await deriveKEK(pw, new Uint8Array(16), U.iter); throw fail; }   // 응답시간으로 아이디 존재 여부가 드러나지 않도록
-  let raw; try{ raw = await aesDec(await deriveKEK(pw, b64d(u.salt), U.iter), b64d(u.iv), b64d(u.wk)); }catch(e){ throw fail; }
+  const kek = await deriveKEK(pw, b64d(u.salt), U.iter);
+  let raw; try{ raw = await aesDec(kek, b64d(u.iv), b64d(u.wk)); }catch(e){ throw fail; }
   await setAuth(id, u.role||'user', raw, remember);
+  AUTH.kek = kek;
+  // 게시 권한: 계정에 암호화 저장된 토큰이 있으면 어느 기기에서든 자동 연결
+  GH.token = ''; GH.verified = false; GH.inAccount = false; GH.remember = !!remember;
+  if(u.gt && (u.role||'user')==='admin'){
+    try{ GH.token = td.decode(await aesDec(kek, b64d(u.gt.iv), b64d(u.gt.ct)));
+         Object.assign(GH, {owner:u.gt.owner||GH.owner, repo:u.gt.repo||GH.repo, branch:u.gt.branch||'main', verified:true, inAccount:true}); }
+    catch(e){ GH.token = ''; }
+  }
+  saveGH();
+}
+/* 현재 연결된 게시 권한(토큰)을 내 계정에 암호화 저장 → 다른 기기에서 로그인만 하면 자동 연결 */
+async function saveTokenToAccount(pw){
+  const cur = await ghGetFile('users.json'); if(!cur) throw new Error('users.json을 찾을 수 없습니다');
+  const U0 = JSON.parse(td.decode(cur.buf)), me = U0.users[AUTH.id]; if(!me) throw new Error('계정을 찾을 수 없습니다');
+  let kek = AUTH.kek;
+  if(!kek){
+    if(!pw) throw new Error('계정 비밀번호를 입력하세요');
+    kek = await deriveKEK(pw, b64d(me.salt), U0.iter);
+    try{ await aesDec(kek, b64d(me.iv), b64d(me.wk)); }catch(e){ throw new Error('계정 비밀번호가 올바르지 않습니다'); }
+    AUTH.kek = kek;
+  }
+  const {iv, ct} = await aesEnc(kek, te.encode(GH.token));
+  await editUsers(U=>{ const u = U.users[AUTH.id]; if(!u) throw new Error('계정을 찾을 수 없습니다');
+    if(u.salt !== me.salt) throw new Error('비밀번호가 방금 변경되었습니다. 다시 로그인 후 시도하세요');
+    u.gt = {owner:GH.owner, repo:GH.repo, branch:GH.branch, iv:b64e(iv), ct:b64e(ct), saved:new Date().toISOString()}; }, `게시 권한 계정 연결: ${AUTH.id}`);
+  GH.inAccount = true; saveGH();
 }
 async function restoreAuth(){
   try{ const s = sessionStorage.getItem(AUTH_KEY) || localStorage.getItem(AUTH_KEY); if(!s) return false;
@@ -1216,6 +1281,7 @@ function logout(){
   if(current==='quiz' && session && !session.done && !confirm('풀이 중인 세션을 종료하고 로그아웃할까요?')) return;
   clearInterval(timerId); session = null;
   try{ sessionStorage.removeItem(AUTH_KEY); localStorage.removeItem(AUTH_KEY); }catch(e){}
+  GH.token = ''; GH.verified = false; GH.inAccount = false; saveGH();     // 게시 권한도 함께 해제 (다음 로그인 때 계정에서 다시 연결)
   AUTH = null; DB = {questions:[], attempts:[], wrong:{}, settings:null, sharedHash:null}; current = 'login';
   viewLogin();
 }
@@ -1274,9 +1340,12 @@ function bindUserAdmin(){
     add.disabled = true; add.textContent = '처리 중…';
     try{
       let existed = false;
+      let newKek = null; const self = id===AUTH.id;
       await editUsers(async U=>{ existed = !!U.users[id];
-        U.users[id] = {role, ...(await wrapFor(pw, U.iter)), created: U.users[id]?.created || new Date().toISOString(), updated: new Date().toISOString()}; },
+        const w = await wrapFor(pw, U.iter, self && !!U.users[id]?.gt); if(self) newKek = w.kek;
+        U.users[id] = {role: self ? (U.users[id]?.role||role) : role, ...w.entry, created: U.users[id]?.created || new Date().toISOString(), updated: new Date().toISOString()}; },
         `사용자 추가/비밀번호 변경: ${id}`);
+      if(newKek) AUTH.kek = newKek;
       toast(`'${id}' ${existed?'비밀번호를 재설정':'사용자를 추가'}했습니다 (1~2분 후 로그인 가능)`, 6000);
       $('#nu_id').value = ''; $('#nu_pw').value = ''; renderUserList();
     }catch(e){ toast('실패: '+e.message, 6000); }
