@@ -174,7 +174,7 @@ const DIFFS = ['상','중','하'];
 const pct = v => v==null || isNaN(v) ? '-' : Math.round(v*100)+'%';
 const fmtSec = s => { s = Math.round(s||0); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); };
 const dayKey = ts => { const d = new Date(ts); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
-function toast(m){ const t = $('#toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toast._t); toast._t = setTimeout(()=>t.classList.remove('show'), 2600); }
+function toast(m, ms=2600){ const t = $('#toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toast._t); toast._t = setTimeout(()=>t.classList.remove('show'), ms); }
 function shuffle(a){ a = a.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
 
 /* 텍스트 → HTML (줄바꿈, 〈보기〉 박스) + 수식 렌더링 */
@@ -313,12 +313,13 @@ function viewUpload(){
     <div class="drop" id="drop" style="margin-top:12px">📄 파일을 끌어다 놓거나 클릭하세요 (xlsx · xls · csv)<input type="file" id="file" accept=".xlsx,.xls,.csv" hidden></div>
     <div id="pv"></div>
   </div>
+  ${adminCardHTML()}
   <div class="card">
     <h3>문제은행 현황 <span class="muted small">(공용 ${nShared} · 개인 ${nLocal}문항)</span></h3>
-    ${SHARED_INFO.available?`<div class="msg ${SHARED_INFO.error?'err':'wrn'}" style="margin-bottom:10px">🌐 공용 문제은행(<b>${SHARED_FILE}</b>)은 관리자가 서버에 올린 파일로 자동 동기화됩니다. 여기서 삭제할 수 없으며, 파일이 바뀌면 다음 접속 때 자동 반영됩니다.${SHARED_INFO.error?' · 최근 동기화 실패: '+esc(SHARED_INFO.error):''}</div>`:''}
+    ${SHARED_INFO.available?`<div class="msg ${SHARED_INFO.error?'err':'wrn'}" style="margin-bottom:10px">🌐 공용 문제은행(<b>${SHARED_FILE}</b>)은 모든 사용자에게 자동 동기화됩니다. ${isAdmin()?'관리자 모드에서는 업로드·삭제가 모든 사용자에게 반영됩니다.':'공용 문제는 관리자만 수정할 수 있습니다.'}${SHARED_INFO.error?' · 최근 동기화 실패: '+esc(SHARED_INFO.error):''}</div>`:''}
     ${DB.questions.length ? `<div class="tbl"><table><tr><th>과목</th><th class="num">문항수</th><th class="num">공용</th><th class="num">객관식</th><th class="num">단답형</th><th class="num">서술형</th><th></th></tr>
       ${Object.entries(bySub).map(([s,o])=>`<tr><td>${esc(s)}</td><td class="num">${o.n}</td><td class="num">${o.shared}</td><td class="num">${o['객관식']}</td><td class="num">${o['단답형']}</td><td class="num">${o['서술형']}</td>
-      <td class="num">${o.n>o.shared?`<button class="btn sm danger" data-del="${esc(s)}">개인문제 삭제</button>`:''}</td></tr>`).join('')}</table></div>` : '<p class="muted">등록된 문제가 없습니다.</p>'}
+      <td class="num">${o.n>o.shared?`<button class="btn sm danger" data-del="${esc(s)}">개인문제 삭제</button>`:''}${isAdmin()&&o.shared?` <button class="btn sm danger" data-delshared="${esc(s)}">공용에서 삭제</button>`:''}</td></tr>`).join('')}</table></div>` : '<p class="muted">등록된 문제가 없습니다.</p>'}
     <div class="row" style="margin-top:12px">
       ${SHARED_INFO.available?'<button class="btn sm" onclick="syncSharedBank(true)">🌐 공용 문제은행 다시 불러오기</button>':''}
       <button class="btn sm" onclick="loadSample(false)">샘플 문제 추가</button>
@@ -329,7 +330,8 @@ function viewUpload(){
   <div class="card">
     <h3>문제 이미지</h3>
     <p class="small muted" style="margin-top:0">양식의 '이미지' 열에 파일명(예: phy_001.png)을 적었다면 같은 이름의 이미지 파일을 여기에 올려 주세요. URL(https://…)을 적었다면 업로드할 필요가 없습니다.</p>
-    <div class="row"><label class="btn sm">🖼 이미지 파일 선택<input type="file" id="imgs" accept="image/*" multiple hidden></label><span class="muted small" id="imgcount"></span></div>
+    <div class="row"><label class="btn sm">🖼 이미지 파일 선택<input type="file" id="imgs" accept="image/*" multiple hidden></label><span class="muted small" id="imgcount"></span>
+      ${isAdmin()?'<label class="small"><input type="checkbox" id="imgshared" checked> 🌐 공용(images 폴더)으로 게시</label>':''}</div>
   </div>
   <div class="card">
     <h3>백업 · 초기화</h3>
@@ -349,7 +351,23 @@ function viewUpload(){
   drop.ondrop = e=>{ e.preventDefault(); drop.classList.remove('over'); if(e.dataTransfer.files[0]) readQuestionFile(e.dataTransfer.files[0]); };
   file.onchange = ()=>{ if(file.files[0]) readQuestionFile(file.files[0]); file.value=''; };
   document.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{ const s=b.dataset.del; if(confirm(`'${s}' 과목의 개인 문제를 삭제할까요? (공용 문제는 유지)`)){ DB.questions = DB.questions.filter(q=>q.subject!==s || q.src==='shared'); saveDB(); viewUpload(); } });
-  $('#imgs').onchange = async e=>{ let n=0; for(const f of e.target.files){ try{ await IMG.put(f.name, f); n++; }catch(err){} } toast(`이미지 ${n}개를 저장했습니다`); refreshImgCount(); };
+  $('#imgs').onchange = async e=>{
+    const files = [...e.target.files], pub = isAdmin() && $('#imgshared')?.checked; let n=0, pn=0, fail=[];
+    if(pub) toast('이미지를 공용으로 게시하는 중…', 60000);
+    for(const f of files){
+      try{ await IMG.put(f.name, f); n++; }catch(err){}
+      if(pub){ try{ await publishImage(f); pn++; }catch(err){ fail.push(f.name+': '+err.message); } }
+    }
+    toast(pub ? `이미지 ${pn}개를 공용으로 게시했습니다${fail.length?` (실패 ${fail.length}: ${fail[0]})`:''}` : `이미지 ${n}개를 저장했습니다`, 5000); refreshImgCount(); e.target.value='';
+  };
+  document.querySelectorAll('[data-delshared]').forEach(b=>b.onclick=async()=>{
+    const s = b.dataset.delshared;
+    if(!confirm(`공용 문제은행에서 '${s}' 과목 문제를 모두 삭제합니다. 모든 사용자에게 반영됩니다. 계속할까요?`)) return;
+    b.disabled = true; b.textContent = '삭제 중…';
+    try{ const n = await publishShared(cur=>cur.filter(q=>q.subject!==s), `과목 삭제: ${s}`); toast(`삭제 완료 (공용 ${n}문항 남음). 다른 사용자에게는 1~2분 후 반영됩니다`, 5000); viewUpload(); }
+    catch(err){ toast('삭제 실패: '+err.message, 6000); b.disabled=false; b.textContent='공용에서 삭제'; }
+  });
+  bindAdminCard();
   $('#bk').onchange = e=>{ const f=e.target.files[0]; if(f) importBackup(f); };
   refreshImgCount();
   if(pending) renderPending();
@@ -424,15 +442,32 @@ function renderPending(){
       <span class="badge b-ok">✅ 정상 ${p.valid.length}</span><span class="badge b-warn">⚠ 경고 ${p.warnings.length}</span><span class="badge b-bad">❌ 오류 ${p.errors.length}</span></div>
     ${p.errors.length?`<div style="margin-top:8px"><div class="small muted">오류 행은 저장되지 않습니다.</div>${list(p.errors,'err')}</div>`:''}
     ${p.warnings.length?`<details style="margin-top:8px"><summary>경고 ${p.warnings.length}건 보기</summary>${list(p.warnings,'wrn')}</details>`:''}
-    <div class="row" style="margin-top:12px">
+    ${isAdmin()?`<div class="row" style="margin-top:12px"><b>저장 위치</b>
+      <label><input type="radio" name="target" value="shared" checked> 🌐 공용 문제은행에 게시 (모든 사용자)</label>
+      <label><input type="radio" name="target" value="local"> 내 브라우저에만 저장</label></div>`:''}
+    <div class="row" style="margin-top:8px">
       <label><input type="radio" name="mode" value="add" checked> 추가 (같은 ID는 덮어쓰기${p.overwrite?` · ${p.overwrite}건`:''})</label>
-      <label><input type="radio" name="mode" value="replace"> 개인 문제 전체 교체</label>
+      <label><input type="radio" name="mode" value="replace"> 전체 교체</label>
       <span class="sp"></span>
       <button class="btn" onclick="pending=null;renderPending()">취소</button>
-      <button class="btn pri" id="commit" ${p.valid.length?'':'disabled'}>${p.valid.length}문항 저장</button>
+      <button class="btn pri" id="commit" ${p.valid.length?'':'disabled'}>${p.valid.length}문항 ${isAdmin()?'게시/저장':'저장'}</button>
     </div></div>`;
-  $('#commit').onclick = ()=>{
+  $('#commit').onclick = async ()=>{
     const mode = document.querySelector('input[name=mode]:checked').value;
+    const target = document.querySelector('input[name=target]:checked')?.value || 'local';
+    if(target==='shared'){
+      if(mode==='replace' && !confirm('공용 문제은행 전체를 이 파일로 교체합니다. 모든 사용자에게 반영됩니다. 계속할까요?')) return;
+      const btn = $('#commit'); btn.disabled = true; btn.textContent = '게시 중…';
+      try{
+        const n = await publishShared(cur=>{
+          if(mode==='replace') return p.valid.slice();
+          const m = new Map(cur.map(q=>[q.id,q])); p.valid.forEach(q=>m.set(q.id,q)); return [...m.values()];
+        }, `문제 업로드: ${p.fname} (${p.valid.length}문항${mode==='replace'?', 전체 교체':''})`);
+        toast(`공용 문제은행에 게시했습니다 (총 ${n}문항). 다른 사용자에게는 1~2분 후 반영됩니다`, 6000);
+        pending = null; viewUpload();
+      }catch(e){ toast('게시 실패: '+e.message, 8000); btn.disabled = false; btn.textContent = `${p.valid.length}문항 게시/저장`; }
+      return;
+    }
     if(mode==='replace'){ if(!confirm('직접 올린 개인 문제를 모두 지우고 교체할까요? (공용 문제는 유지)')) return; DB.questions = DB.questions.filter(q=>q.src==='shared'); }
     const map = new Map(DB.questions.map(q=>[q.id,q])); for(const q of p.valid){ delete q.src; map.set(q.id,q); }
     DB.questions = [...map.values()]; saveDB(); toast(`${p.valid.length}문항을 저장했습니다`); pending = null; viewUpload();
@@ -947,7 +982,7 @@ const SHARED_INFO = {available:false, loading:false, error:null};
 function hashBuf(buf){ const b = new Uint8Array(buf); let h = 0x811c9dc5; for(let i=0;i<b.length;i++){ h ^= b[i]; h = Math.imul(h, 0x01000193); } return (h>>>0).toString(16)+'-'+b.length; }
 async function syncSharedBank(force){
   if(location.protocol==='file:' || !window.XLSX) return;
-  SHARED_INFO.loading = true;
+  SHARED_INFO.loading = true; let changed = false;
   try{
     const res = await fetch(SHARED_FILE, {cache:'no-cache'});
     if(!res.ok) return;                                   // 공용 파일이 없으면 개인용으로 동작
@@ -962,14 +997,137 @@ async function syncSharedBank(force){
     valid.forEach(q=>q.src='shared');
     const ids = new Set(valid.map(q=>q.id));
     DB.questions = [...valid, ...DB.questions.filter(q=>q.src!=='shared' && !ids.has(q.id))];
-    DB.sharedHash = hash; SHARED_INFO.error = null; saveDB();
+    DB.sharedHash = hash; SHARED_INFO.error = null; saveDB(); changed = true;
     toast(`공용 문제은행 ${valid.length}문항을 ${had?'업데이트했':'불러왔'}습니다${errors.length?` (오류 ${errors.length}행 제외)`:''}`);
-  }catch(e){ console.warn(e); SHARED_INFO.error = e.message; }
+  }catch(e){ console.warn(e); SHARED_INFO.error = e.message; changed = true; }
   finally{
     SHARED_INFO.loading = false;
-    if(['home','setup','upload'].includes(current)) VIEWS[current]();   // 풀이 중에는 화면을 건드리지 않음
+    if((changed || !DB.questions.length || !syncSharedBank._once) && ['home','setup','upload'].includes(current)) VIEWS[current]();
+    syncSharedBank._once = true;   // 풀이 중에는 화면을 건드리지 않음
   }
 }
+
+/* =========================================================
+   14. 관리자 게시 (GitHub 저장소에 questions.xlsx / images 커밋)
+   - 토큰은 관리자 브라우저에만 저장되며 코드·저장소에는 포함되지 않음
+   - 게시 → GitHub Pages 재배포(약 1~2분) → 다른 사용자는 접속/새로고침 시 자동 반영
+   ========================================================= */
+const GH_KEY = 'tamgu_gh_admin';
+function detectRepo(){
+  const m = location.hostname.match(/^([^.]+)\.github\.io$/i);
+  if(!m) return {owner:'', repo:''};
+  const seg = location.pathname.split('/').filter(Boolean)[0];
+  return {owner:m[1], repo: seg && !/\.html?$/i.test(seg) ? seg : m[1]+'.github.io'};
+}
+function loadGH(){
+  let d = null;
+  try{ d = JSON.parse(localStorage.getItem(GH_KEY) || sessionStorage.getItem(GH_KEY) || 'null'); }catch(e){}
+  return Object.assign({...detectRepo(), branch:'main', token:'', remember:false, verified:false, login:''}, d||{});
+}
+let GH = loadGH();
+function saveGH(){
+  try{ localStorage.removeItem(GH_KEY); sessionStorage.removeItem(GH_KEY);
+       if(GH.token) (GH.remember ? localStorage : sessionStorage).setItem(GH_KEY, JSON.stringify(GH)); }catch(e){}
+}
+const isAdmin = () => !!(GH.token && GH.verified);
+const encPath = path => path.split('/').map(encodeURIComponent).join('/');
+async function gh(path, {accept, allow404, ...init} = {}){
+  const res = await fetch(`https://api.github.com/repos/${encodeURIComponent(GH.owner)}/${encodeURIComponent(GH.repo)}${path}`, {
+    cache:'no-store', ...init,
+    headers:{'Authorization':'Bearer '+GH.token, 'Accept':accept||'application/vnd.github+json', 'X-GitHub-Api-Version':'2022-11-28', ...(init.body?{'Content-Type':'application/json'}:{})}});
+  if(!res.ok && !(allow404 && res.status===404)){
+    let msg = ''; try{ msg = (await res.json()).message; }catch(e){}
+    const hint = res.status===401 ? ' (토큰이 잘못되었거나 만료됨)' : res.status===403||res.status===404 ? ' (토큰에 이 저장소의 Contents 쓰기 권한이 있는지 확인)' : '';
+    const err = new Error(`GitHub ${res.status} ${msg}${hint}`); err.status = res.status; throw err;
+  }
+  return res;
+}
+async function ghGetFile(path){
+  const q = `/contents/${encPath(path)}?ref=${encodeURIComponent(GH.branch)}`;
+  const meta = await gh(q, {allow404:true}); if(meta.status===404) return null;
+  const j = await meta.json();
+  const raw = await gh(q, {accept:'application/vnd.github.raw'});
+  return {sha:j.sha, buf: await raw.arrayBuffer()};
+}
+async function ghPutFile(path, b64, sha, message){
+  const r = await gh(`/contents/${encPath(path)}`, {method:'PUT', body: JSON.stringify({message, content:b64, branch:GH.branch, ...(sha?{sha}:{})})});
+  return r.json();
+}
+const b64ToBuf = b64 => Uint8Array.from(atob(b64), c=>c.charCodeAt(0)).buffer;
+const fileToB64 = f => new Promise((res,rej)=>{ const r = new FileReader(); r.onload = ()=>res(String(r.result).split(',')[1]); r.onerror = ()=>rej(r.error); r.readAsDataURL(f); });
+
+/* 최신 공용 파일을 받아 mutator로 변경 후 커밋. 동시 게시 충돌(409/422) 시 1회 재시도 */
+async function publishShared(mutator, message){
+  if(!isAdmin()) throw new Error('관리자 연결이 필요합니다');
+  for(let attempt=0; ; attempt++){
+    const cur = await ghGetFile(SHARED_FILE);
+    let qs = [];
+    if(cur){ const wb = XLSX.read(cur.buf, {type:'array'}); const sh = wb.Sheets['문제'] || wb.Sheets[wb.SheetNames[0]];
+             qs = (await validateRows(XLSX.utils.sheet_to_json(sh, {defval:'', raw:false}), SHARED_FILE)).valid; }
+    const next = mutator(qs).map(q=>{ const c = {...q}; delete c.src; return c; });
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([HEADERS, ...next.map(qToRow)]);
+    ws['!cols'] = HEADERS.map(h=>({wch: h==='문제'?60: h==='해설'?40: h.startsWith('보기')?14:12}));
+    XLSX.utils.book_append_sheet(wb, ws, '문제');
+    const b64 = XLSX.write(wb, {type:'base64', bookType:'xlsx'});
+    try{ await ghPutFile(SHARED_FILE, b64, cur?.sha, `[탐구문제] ${message}`); }
+    catch(e){ if((e.status===409 || e.status===422) && attempt===0) continue; throw e; }
+    // 내 화면에도 즉시 반영 (다음 동기화 때 같은 파일로 인식되도록 해시 저장)
+    next.forEach(q=>q.src='shared'); const ids = new Set(next.map(q=>q.id));
+    DB.questions = [...next, ...DB.questions.filter(q=>q.src!=='shared' && !ids.has(q.id))];
+    DB.sharedHash = hashBuf(b64ToBuf(b64)); SHARED_INFO.available = true; saveDB();
+    return next.length;
+  }
+}
+async function publishImage(f){
+  const path = 'images/' + f.name;
+  const meta = await gh(`/contents/${encPath(path)}?ref=${encodeURIComponent(GH.branch)}`, {allow404:true});
+  const sha = meta.status===404 ? null : (await meta.json()).sha;
+  await ghPutFile(path, await fileToB64(f), sha, `[탐구문제] 이미지 게시: ${f.name}`);
+}
+
+function adminCardHTML(){
+  if(isAdmin()) return `<div class="card"><div class="row"><h3 style="margin:0">🔐 관리자 모드</h3>
+      <span class="badge b-ok">연결됨</span><span class="muted small">${esc(GH.owner)}/${esc(GH.repo)} · ${esc(GH.branch)}${GH.login?' · '+esc(GH.login):''}</span><span class="sp"></span>
+      <button class="btn sm" id="ghlogout">연결 해제(토큰 삭제)</button></div>
+    <div class="hint">문제를 업로드하면 '공용 문제은행에 게시'를 선택할 수 있습니다. 게시한 문제는 약 1~2분 후 모든 사용자에게 자동 반영됩니다.</div></div>`;
+  return `<details class="card" id="admincard"><summary>🔐 관리자 설정 (공용 문제 게시 권한)</summary>
+    <p class="small muted">관리자만 사용합니다. GitHub 토큰을 연결하면 이 화면에서 올린 문제를 모든 사용자에게 게시할 수 있습니다. 토큰은 이 브라우저에만 저장되며 저장소에는 올라가지 않습니다.</p>
+    <div class="row"><label class="small">계정 <input type="text" id="ghowner" value="${esc(GH.owner)}" style="width:130px"></label>
+      <label class="small">저장소 <input type="text" id="ghrepo" value="${esc(GH.repo)}" style="width:150px"></label>
+      <label class="small">브랜치 <input type="text" id="ghbranch" value="${esc(GH.branch)}" style="width:90px"></label></div>
+    <div class="row" style="margin-top:8px"><input type="password" id="ghtoken" placeholder="GitHub 토큰 (github_pat_…)" style="flex:1;min-width:220px" autocomplete="off">
+      <label class="small"><input type="checkbox" id="ghremember"> 이 기기에서 기억</label>
+      <button class="btn sm pri" id="ghverify">연결 확인</button></div>
+    <details style="margin-top:10px"><summary class="small">토큰 발급 방법 (최초 1회)</summary><ol class="small" style="margin:6px 0 0;padding-left:20px">
+      <li>GitHub → 우측 상단 프로필 → <b>Settings → Developer settings → Personal access tokens → Fine-grained tokens</b> → <b>Generate new token</b></li>
+      <li>Expiration: 90일 권장 · Repository access: <b>Only select repositories</b> → <b>${esc(GH.repo||'tamgu-quiz')}</b></li>
+      <li>Permissions → Repository permissions → <b>Contents: Read and write</b> → Generate token</li>
+      <li>생성된 토큰(github_pat_…)을 복사해 위 칸에 붙여넣고 [연결 확인]</li></ol>
+      <div class="hint">공용 PC에서는 '이 기기에서 기억'을 끄세요 (브라우저를 닫으면 토큰이 지워집니다).</div></details></details>`;
+}
+function bindAdminCard(){
+  const lo = $('#ghlogout');
+  if(lo) lo.onclick = ()=>{ if(!confirm('관리자 연결을 해제하고 이 브라우저에서 토큰을 삭제할까요?')) return; GH.token=''; GH.verified=false; saveGH(); viewUpload(); };
+  const vb = $('#ghverify'); if(!vb) return;
+  vb.onclick = async ()=>{
+    GH.owner = $('#ghowner').value.trim(); GH.repo = $('#ghrepo').value.trim(); GH.branch = $('#ghbranch').value.trim() || 'main';
+    GH.token = $('#ghtoken').value.trim(); GH.remember = $('#ghremember').checked; GH.verified = false;
+    if(!GH.owner || !GH.repo || !GH.token) return toast('계정, 저장소, 토큰을 모두 입력하세요');
+    vb.disabled = true; vb.textContent = '확인 중…';
+    try{
+      const j = await (await gh('')).json();
+      if(j.permissions && !j.permissions.push) throw new Error('이 계정에 저장소 쓰기 권한이 없습니다');
+      GH.login = j.owner?.login || ''; GH.verified = true; saveGH();
+      toast('관리자 연결 완료. 이제 업로드한 문제를 공용으로 게시할 수 있습니다', 5000); viewUpload();
+    }catch(e){ GH.token=''; toast('연결 실패: '+e.message, 8000); vb.disabled = false; vb.textContent = '연결 확인'; }
+  };
+}
+
+/* 다른 사용자: 탭으로 돌아올 때 공용 문제 변경 여부 확인 (풀이 중 제외) */
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState==='visible' && current!=='quiz') syncSharedBank(false);
+});
 
 go('home');
 syncSharedBank(false);
