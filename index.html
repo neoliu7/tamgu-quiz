@@ -149,7 +149,7 @@ const LS_BASE = 'tamgu_quiz_v1';
 let LS_KEY = LS_BASE;                       // 로그인 후 'tamgu_quiz_v1:<아이디>'로 전환 (사용자별 학습기록 분리)
 let DB = {questions:[], attempts:[], wrong:{}, settings:null, sharedHash:null};
 function loadDB(){
-  try{ const s = localStorage.getItem(LS_KEY); if(s){ const d = Object.assign({questions:[],attempts:[],wrong:{},settings:null,sharedHash:null,qTomb:{},resetAt:0,settingsMt:0}, JSON.parse(s));
+  try{ const s = localStorage.getItem(LS_KEY); if(s){ const d = Object.assign({questions:[],attempts:[],wrong:{},settings:null,sharedHash:null,qTomb:{},resetAt:0,settingsMt:0,skips:{}}, JSON.parse(s));
     d.attempts.forEach(a=>{ if(!a.k) a.k = a.qid+'|'+a.ts; }); return d; } }catch(e){}
   return {questions:[], attempts:[], wrong:{}, settings:null};
 }
@@ -552,7 +552,13 @@ function loadSample(toHome){
    7. 출제 설정 & 랜덤 출제
    ========================================================= */
 let cfg = null;
-function defaultCfg(subs){ return {subjects:subs.slice(), unitsOff:[], types:TYPES.slice(), diffs:DIFFS.slice(), count:20, limit:0, excludeCorrect:false, weighted:true, shuffle:false}; }
+function defaultCfg(subs){ return {subjects:subs.slice(), unitsOff:[], types:TYPES.slice(), diffs:DIFFS.slice(), count:20, limit:0, excludeCorrect:false, excludeSkipped:false, weighted:true, shuffle:false}; }
+/* 건너뛴 문제: {문항ID: {ts, mt}} · 해제 시 {deleted:true, mt} (다른 기기와 병합 시 되살아나지 않도록) */
+const isSkipped = id => { const k = DB.skips && DB.skips[id]; return !!(k && !k.deleted); };
+const skippedCount = () => DB.questions.filter(q=>isSkipped(q.id)).length;
+function markSkipped(id){ DB.skips = DB.skips || {}; const t = Date.now(); DB.skips[id] = {ts:t, mt:t}; saveDB(); scheduleRecordSync(); }
+function unmarkSkipped(id){ if(isSkipped(id)){ DB.skips[id] = {deleted:true, mt:Date.now()}; } }
+function clearSkipped(){ const t = Date.now(); for(const id of Object.keys(DB.skips||{})) if(isSkipped(id)) DB.skips[id] = {deleted:true, mt:t}; saveDB(); scheduleRecordSync(); }
 function viewSetup(){
   const subs = [...new Set(DB.questions.map(q=>q.subject))];
   if(!subs.length){ $('#app').innerHTML = `<div class="card empty"><h2>등록된 문제가 없습니다</h2><div class="row" style="justify-content:center"><button class="btn pri" onclick="loadSample(false);go('setup')">샘플 문제 불러오기</button><button class="btn" onclick="go('upload')">문제 업로드</button></div></div>`; return; }
@@ -567,8 +573,10 @@ function viewSetup(){
     <div class="field row"><label class="t" style="margin:0">문항 수</label><input type="number" id="cnt" min="1" max="200" value="${cfg.count}" style="width:90px">
       <label class="t" style="margin:0 0 0 16px">제한시간</label><select id="lim">${[[0,'없음'],[10,'10분'],[20,'20분'],[30,'30분 (수능 1과목)'],[60,'60분']].map(([v,l])=>`<option value="${v}" ${cfg.limit==v?'selected':''}>${l}</option>`).join('')}</select></div>
     <div class="field"><label class="t">옵션</label><div class="chips">
-      ${chip('opt','excludeCorrect',cfg.excludeCorrect,'이미 맞힌 문제 제외')}${chip('opt','weighted',cfg.weighted,'취약 단원 가중 출제')}${chip('opt','shuffle',cfg.shuffle,'선택지 순서 섞기')}</div>
-      <div class="hint">취약 단원 가중: 정답률이 낮은 단원의 문제가 더 자주 나옵니다. 선택지 섞기는 '①, ②' 등 번호를 참조하는 보기가 있으면 끄세요.</div></div>
+      ${chip('opt','excludeCorrect',cfg.excludeCorrect,'이미 맞힌 문제 제외')}${chip('opt','excludeSkipped',cfg.excludeSkipped,`건너뛴 문제 제외${skippedCount()?` (${skippedCount()})`:''}`)}${chip('opt','weighted',cfg.weighted,'취약 단원 가중 출제')}${chip('opt','shuffle',cfg.shuffle,'선택지 순서 섞기')}</div>
+      <div class="hint">취약 단원 가중: 정답률이 낮은 단원의 문제가 더 자주 나옵니다. 선택지 섞기는 '①, ②' 등 번호를 참조하는 보기가 있으면 끄세요.</div>
+      <div class="hint">건너뛴 문제 제외: 풀이 중 [건너뛰기]한 문제(너무 쉬움·오류·불필요)를 출제와 오답 다시 풀기에서 뺍니다. 나중에 다시 풀어 맞히거나 틀리면 자동으로 해제됩니다.
+        ${skippedCount()?`<a href="#" id="skipclear">건너뛴 기록 ${skippedCount()}개 모두 해제</a>`:''}</div></div>
     <div class="row"><span id="poolinfo" class="muted"></span><span class="sp"></span><button class="btn pri" id="start">시작하기 ▶</button></div></div>`;
   const renderUnits = ()=>{
     const units = []; const seen = new Set();
@@ -587,6 +595,7 @@ function viewSetup(){
   $('#uall').onclick = ()=>{ cfg.unitsOff=[]; renderUnits(); };
   $('#unone').onclick = ()=>{ cfg.unitsOff = [...new Set(DB.questions.filter(q=>cfg.subjects.includes(q.subject)).map(q=>q.subject+'|'+q.unit))]; renderUnits(); };
   $('#cnt').oninput = e=>{ cfg.count = Math.max(1, +e.target.value||1); };
+  const sc = $('#skipclear'); if(sc) sc.onclick = e=>{ e.preventDefault(); if(confirm(`건너뛴 문제 ${skippedCount()}개의 표시를 모두 해제할까요? 다시 출제 대상에 포함됩니다.`)){ clearSkipped(); toast('건너뛴 표시를 해제했습니다'); viewSetup(); } };
   $('#lim').onchange = e=>{ cfg.limit = +e.target.value; };
   $('#start').onclick = ()=>{
     const pool = buildPool(cfg); const qs = sample(pool, Math.min(cfg.count, pool.length), cfg.weighted);
@@ -598,7 +607,7 @@ function viewSetup(){
 }
 function buildPool(c){
   const correct = new Set(DB.attempts.filter(a=>a.score===1).map(a=>a.qid));
-  return DB.questions.filter(q=>c.subjects.includes(q.subject) && !c.unitsOff.includes(q.subject+'|'+q.unit) && c.types.includes(q.type) && c.diffs.includes(q.difficulty) && !(c.excludeCorrect && correct.has(q.id)));
+  return DB.questions.filter(q=>c.subjects.includes(q.subject) && !c.unitsOff.includes(q.subject+'|'+q.unit) && c.types.includes(q.type) && c.diffs.includes(q.difficulty) && !(c.excludeCorrect && correct.has(q.id)) && !(c.excludeSkipped && isSkipped(q.id)));
 }
 /* 가중치 비복원 추출: weight = 0.2 + (1 - 단원 정답률), 기록 없는 단원은 정답률 0.5로 간주 */
 function sample(pool, n, weighted){
@@ -625,7 +634,8 @@ function startSession(qs, opt){
   current = 'quiz'; go('quiz');
 }
 function startWrongSession(){
-  const ids = openWrong().map(([id])=>id);
+  const exSkip = (cfg || DB.settings || {}).excludeSkipped;
+  const ids = openWrong().map(([id])=>id).filter(id=>!(exSkip && isSkipped(id)));
   const qs = shuffle(DB.questions.filter(q=>ids.includes(q.id)));
   if(!qs.length) return toast('다시 풀 오답이 없습니다');
   startSession(qs, {limit:0, shuffle:false, mode:'wrong'});
@@ -663,7 +673,7 @@ function viewQuiz(){
     const inp = $('#uans'); inp.focus(); inp.oninput = ()=>{ $('#submit').disabled = !inp.value.trim(); };
   }
   $('#submit').onclick = submit;
-  $('#skip').onclick = ()=>{ session.skipped++; nextQ(); };
+  $('#skip').onclick = ()=>{ session.skipped++; markSkipped(q.id); nextQ(); };
   $('#quit').onclick = ()=>{ if(confirm('여기서 종료하고 결과를 볼까요?')) finishSession(true); };
 }
 function answerAreaHTML(it){
@@ -741,7 +751,7 @@ function submit(){
 function record(it, score, answer, time){
   const q = it.q;
   const a = {qid:q.id, subject:q.subject, unit:q.unit, subunit:q.subunit, type:q.type, difficulty:q.difficulty, points:q.points, score, answer, time:Math.round(time), ts:Date.now(), sid:session.id};
-  a.k = a.qid+'|'+a.ts; a.mt = a.ts;
+  a.k = a.qid+'|'+a.ts; a.mt = a.ts; unmarkSkipped(q.id);
   DB.attempts.push(a); it.att = a;
   const w0 = DB.wrong[q.id], w = w0 && !w0.deleted ? w0 : null;
   if(score < 1){ DB.wrong[q.id] = {count:(w?.count||0)+1, lastTs:a.ts, cleared:false, starred:w?.starred||false, mt:a.ts}; }
@@ -1418,7 +1428,7 @@ function setSyncStatus(st){
 function scheduleRecordSync(){ if(!SYNC) return; clearTimeout(scheduleRecordSync._t); scheduleRecordSync._t = setTimeout(syncRecords, 4000); }
 function localRecord(){
   return {attempts:DB.attempts, wrong:DB.wrong, questions:DB.questions.filter(q=>q.src!=='shared').map(q=>{ const c = {...q}; delete c.src; return c; }),
-          qTomb:DB.qTomb||{}, settings:DB.settings, settingsMt:DB.settingsMt||0, resetAt:DB.resetAt||0};
+          qTomb:DB.qTomb||{}, skips:DB.skips||{}, settings:DB.settings, settingsMt:DB.settingsMt||0, resetAt:DB.resetAt||0};
 }
 const sortObj = o => Object.fromEntries(Object.keys(o||{}).sort().map(k=>[k,o[k]]));
 function mergeRecords(L, R){
@@ -1435,12 +1445,14 @@ function mergeRecords(L, R){
   }
   const qTomb = {...(R.qTomb||{})}; for(const [id,t] of Object.entries(L.qTomb||{})) qTomb[id] = Math.max(qTomb[id]||0, t);
   const qm = new Map(); for(const q of [...(R.questions||[]), ...(L.questions||[])]){ const o = qm.get(q.id); if(!o || (q.mt||0) > (o.mt||0)) qm.set(q.id, q); }
+  const skips = {};
+  for(const src of [L.skips||{}, R.skips||{}]) for(const [id,k] of Object.entries(src)){ const o = skips[id]; if(!o || (k.mt||0) > (o.mt||0)) skips[id] = k; }
   const useL = (L.settingsMt||0) >= (R.settingsMt||0);
   return {v:1, attempts:[...am.values()].sort((x,y)=>x.ts-y.ts || (x.k<y.k?-1:1)), wrong:sortObj(wrong),
           questions:[...qm.values()].filter(q=>!((qTomb[q.id]||0) > (q.mt||0))).sort((x,y)=>x.id<y.id?-1:1),
-          qTomb:sortObj(qTomb), settings: useL ? L.settings : R.settings, settingsMt: Math.max(L.settingsMt||0, R.settingsMt||0), resetAt};
+          qTomb:sortObj(qTomb), skips:sortObj(skips), settings: useL ? L.settings : R.settings, settingsMt: Math.max(L.settingsMt||0, R.settingsMt||0), resetAt};
 }
-const recordJSON = r => JSON.stringify({attempts:r.attempts, wrong:sortObj(r.wrong), questions:[...(r.questions||[])].sort((x,y)=>x.id<y.id?-1:1), qTomb:sortObj(r.qTomb), settings:r.settings, settingsMt:r.settingsMt||0, resetAt:r.resetAt||0});
+const recordJSON = r => JSON.stringify({attempts:r.attempts, wrong:sortObj(r.wrong), questions:[...(r.questions||[])].sort((x,y)=>x.id<y.id?-1:1), qTomb:sortObj(r.qTomb), skips:sortObj(r.skips), settings:r.settings, settingsMt:r.settingsMt||0, resetAt:r.resetAt||0});
 async function syncRecords(){
   if(!AUTH || !SYNC) return;
   if(SYNC_STATE.busy){ SYNC_STATE.again = true; return; }
@@ -1458,7 +1470,7 @@ async function syncRecords(){
       merged.questions = merged.questions.filter(q=>!sids.has(q.id));      // 공용으로 게시된 문항은 개인 목록에서 제외
       const mergedStr = recordJSON(merged);
       DB.attempts = merged.attempts; DB.wrong = merged.wrong; DB.qTomb = merged.qTomb; DB.resetAt = merged.resetAt;
-      DB.settings = merged.settings; DB.settingsMt = merged.settingsMt;
+      DB.settings = merged.settings; DB.settingsMt = merged.settingsMt; DB.skips = merged.skips;
       DB.questions = [...shared, ...merged.questions.filter(q=>!sids.has(q.id))];
       saveDB();
       const incoming = mergedStr !== before;
