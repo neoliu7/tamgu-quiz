@@ -826,15 +826,44 @@ function wrongItemHTML(q, att){
 /* =========================================================
    10. 분석 리포트
    ========================================================= */
-let anaF = {days:30, subject:'', group:'unit'};
+let anaF = {days:30, subject:'', group:'unit', user:null};
+async function loadUserAttempts(login){
+  await loadMembers();                                                   // 최신 회원 상태 (방금 첫 로그인한 사용자 포함)
+  const m = (SB.members||[]).find(x=>x.login_id===login);
+  ANA_CACHE[login] = m && m.user_id ? (await sbAll('attempts', `select=*&user_id=eq.${m.user_id}&order=id.asc`)).map(rowToAttempt) : [];
+}
+async function renderUserSummary(){
+  const el = $('#usum'); if(!el) return;
+  try{
+    const rows = await sbFetch('/rest/v1/v_user_summary?select=*&order=login_id.asc');
+    el.innerHTML = `<h3>👥 사용자별 학습 현황 <span class="muted small">(전체 기간 · 이름을 누르면 상세 분석)</span></h3><div class="tbl"><table>
+      <tr><th>사용자</th><th class="num">풀이</th><th class="num">정답률</th><th class="num">평균시간</th><th>최근 학습</th></tr>
+      ${rows.map(r=>`<tr><td><a href="#" data-pick="${esc(r.login_id)}">${esc(r.login_id)}</a>${r.login_id===anaF.user?' <span class="badge b-pri">보는 중</span>':''}</td>
+        <td class="num">${r.attempts}</td><td class="num">${r.attempts?pct(Number(r.accuracy)):'-'}</td><td class="num">${r.attempts?fmtSec(Number(r.avg_time_sec)):'-'}</td>
+        <td>${r.last_activity?new Date(r.last_activity).toLocaleString('ko-KR',{dateStyle:'short',timeStyle:'short'}):'-'}</td></tr>`).join('')}</table></div>`;
+    el.querySelectorAll('[data-pick]').forEach(a=>a.onclick=e=>{ e.preventDefault(); anaF.user = a.dataset.pick; delete ANA_CACHE[anaF.user]; viewAnalysis(); });
+  }catch(e){ el.innerHTML = `<div class="small muted">사용자별 현황을 불러오지 못했습니다: ${esc(e.message)}</div>`; }
+}
 function viewAnalysis(){
-  const subs = [...new Set(DB.attempts.map(a=>a.subject))];
+  const isAdm = AUTH.role==='admin' && !!SB.session;
+  if(!anaF.user || !isAdm) anaF.user = AUTH.id;
+  const other = anaF.user !== AUTH.id;
+  if(isAdm && !SB.members){ loadMembers().then(m=>{ if(m && current==='analysis') viewAnalysis(); }); }
+  let source = DB.attempts;
+  if(other){
+    source = ANA_CACHE[anaF.user];
+    if(!source){ $('#app').innerHTML = `<h2>분석 리포트</h2><div class="card empty"><p>'${esc(anaF.user)}'의 학습기록을 불러오는 중…</p></div>`;
+      loadUserAttempts(anaF.user).then(()=>{ if(current==='analysis') viewAnalysis(); }).catch(e=>{ toast('불러오기 실패: '+e.message, 6000); anaF.user = AUTH.id; viewAnalysis(); }); return; }
+  }
+  const subs = [...new Set(source.map(a=>a.subject))];
   const since = anaF.days ? Date.now() - anaF.days*86400000 : 0;
-  const atts = DB.attempts.filter(a=>a.ts>=since && (!anaF.subject || a.subject===anaF.subject));
-  const head = `<div class="row" style="margin-bottom:14px"><h2 style="margin:0">분석 리포트</h2><span class="sp"></span>
+  const atts = source.filter(a=>a.ts>=since && (!anaF.subject || a.subject===anaF.subject));
+  const userSel = isAdm ? `<select id="fu">${(SB.members||[{login_id:AUTH.id, user_id:1}]).filter(m=>m.active!==false).map(m=>`<option value="${esc(m.login_id)}" ${anaF.user===m.login_id?'selected':''}>👤 ${esc(m.login_id)}${m.login_id===AUTH.id?' (나)':''}${m.user_id?'':' · 미접속'}</option>`).join('')}</select>` : '';
+  const head = `${isAdm?'<div class="card" id="usum"><div class="small muted">사용자별 현황 불러오는 중…</div></div>':''}
+    <div class="row" style="margin-bottom:14px"><h2 style="margin:0">분석 리포트${other?` <span class="badge b-warn">${esc(anaF.user)}</span>`:''}</h2><span class="sp"></span>${userSel}
     <select id="fd">${[[7,'최근 7일'],[30,'최근 30일'],[90,'최근 90일'],[0,'전체 기간']].map(([v,l])=>`<option value="${v}" ${anaF.days==v?'selected':''}>${l}</option>`).join('')}</select>
     <select id="fs"><option value="">전체 과목</option>${subs.map(s=>`<option ${anaF.subject===s?'selected':''}>${esc(s)}</option>`).join('')}</select></div>`;
-  if(!atts.length){ $('#app').innerHTML = head + `<div class="card empty"><p>선택한 기간에 풀이 기록이 없습니다.</p><button class="btn pri" onclick="go('setup')">문제 풀러 가기</button></div>`; bindAnaFilters(); return; }
+  if(!atts.length){ $('#app').innerHTML = head + `<div class="card empty"><p>선택한 기간에 풀이 기록이 없습니다.</p>${other?'':`<button class="btn pri" onclick="go('setup')">문제 풀러 가기</button>`}</div>`; bindAnaFilters(); renderUserSummary(); return; }
   const n = atts.length, acc = atts.reduce((s,a)=>s+a.score,0)/n, avgT = atts.reduce((s,a)=>s+a.time,0)/n;
   const bySub = aggregate(atts, a=>a.subject).sort((a,b)=>a.acc-b.acc);
   const byUnit = aggregate(atts, a=> anaF.group==='sub' ? a.subject+'|'+a.unit+'|'+(a.subunit||'(미지정)') : a.subject+'|'+a.unit).sort((a,b)=>(a.n>=MIN_N?0:1)-(b.n>=MIN_N?0:1) || a.acc-b.acc);
@@ -848,7 +877,7 @@ function viewAnalysis(){
       <div class="kpi"><div class="l">평균 풀이시간</div><div class="v">${fmtSec(avgT)}</div></div>
       <div class="kpi"><div class="l">취약 단원 수</div><div class="v">${aggregate(atts,a=>a.subject+'|'+a.unit).filter(o=>o.n>=MIN_N&&o.acc<WEAK).length}</div></div>
     </div>
-    <div class="card"><h3>💡 진단 및 학습 제안</h3><ul style="margin:0;padding-left:20px">${diagnose(atts, weak, avgT).map(s=>`<li>${s}</li>`).join('')}</ul></div>
+    <div class="card"><h3>💡 진단 및 학습 제안</h3><ul style="margin:0;padding-left:20px">${diagnose(atts, weak, avgT, !other).map(s=>`<li>${s}</li>`).join('')}</ul></div>
     <div class="charts">
       <div class="card"><h3>${anaF.subject?'단원별':'과목별'} 정답률</h3><div class="chartbox"><canvas id="c1"></canvas></div></div>
       <div class="card"><h3>일자별 정답률 추이</h3><div class="chartbox"><canvas id="c2"></canvas></div></div>
@@ -865,9 +894,11 @@ function viewAnalysis(){
     ${!anaF.subject && bySub.length?`<div class="card"><h3>과목별 요약</h3>${miniTable(bySub)}</div>`:''}`;
   bindAnaFilters();
   $('#grp').onchange = e=>{ anaF.group = e.target.checked?'sub':'unit'; viewAnalysis(); };
+  renderUserSummary();
   drawCharts(anaF.subject ? aggregate(atts, a=>a.unit) : bySub, byDay);
 }
 function bindAnaFilters(){
+  const fu = $('#fu'); if(fu) fu.onchange = e=>{ anaF.user = e.target.value; delete ANA_CACHE[anaF.user]; viewAnalysis(); };
   $('#fd').onchange = e=>{ anaF.days = +e.target.value; viewAnalysis(); };
   $('#fs').onchange = e=>{ anaF.subject = e.target.value; viewAnalysis(); };
 }
@@ -876,7 +907,7 @@ function miniTable(rows, order){
   return `<div class="tbl"><table><tr><th>구분</th><th class="num">풀이</th><th class="num">정답률</th><th class="num">평균시간</th><th>판정</th></tr>
     ${rows.map(o=>`<tr><td>${esc(o.key)}</td><td class="num">${o.n}</td><td class="num">${pct(o.acc)}</td><td class="num">${fmtSec(o.avgTime)}</td><td>${judge(o)}</td></tr>`).join('')}</table></div>`;
 }
-function diagnose(atts, weak, avgT){
+function diagnose(atts, weak, avgT, own=true){
   const out = [];
   if(!weak.length){
     const low = aggregate(atts, a=>a.subject+'|'+a.unit).filter(o=>o.n<MIN_N);
@@ -895,7 +926,7 @@ function diagnose(atts, weak, avgT){
   for(const o of slow.slice(0,2)) out.push(`<b>${esc(o.sample.subject)} › ${esc(o.sample.unit)}</b>: 정답률은 ${pct(o.acc)}이지만 평균 ${fmtSec(o.avgTime)}로 전체 평균보다 오래 걸립니다. 시간 단축 연습이 필요합니다.`);
   const types = aggregate(atts, a=>a.type).filter(o=>o.n>=MIN_N).sort((a,b)=>a.acc-b.acc);
   if(types.length>1 && types[types.length-1].acc - types[0].acc >= 0.2) out.push(`유형별 편차: '${types[0].key}' 정답률(${pct(types[0].acc)})이 '${types[types.length-1].key}'(${pct(types[types.length-1].acc)})보다 크게 낮습니다.`);
-  const wn = openWrong().length; if(wn) out.push(`해결하지 못한 오답이 ${wn}문항 있습니다. <a href="#" onclick="startWrongSession();return false">오답 다시 풀기</a>로 복습하세요.`);
+  const wn = own ? openWrong().length : 0; if(wn) out.push(`해결하지 못한 오답이 ${wn}문항 있습니다. <a href="#" onclick="startWrongSession();return false">오답 다시 풀기</a>로 복습하세요.`);
   return out;
 }
 function drawCharts(groups, byDay){
@@ -1132,18 +1163,9 @@ function adminCardHTML(){
          ${AUTH.kek?'':'<input type="password" id="acpw" placeholder="내 계정 비밀번호" style="width:150px" autocomplete="current-password">'}
          <button class="btn sm pri" id="acsave">모든 기기에 자동 연결</button>`}</div>
     <div class="hint">문제를 업로드하면 '공용 문제은행에 게시'를 선택할 수 있습니다. 게시한 문제는 약 1~2분 후 모든 사용자에게 자동 반영됩니다.</div>
-    <h3 style="margin:18px 0 8px">☁ 학습기록 기기 간 동기화</h3>
-    <div class="small">${SYNC ? `<span class="badge b-ok">사용 중</span> <span class="muted">${esc(SYNC.owner)}/${esc(SYNC.repo)} · 모든 사용자의 학습기록이 로그인한 기기 간에 자동 동기화됩니다.</span>`
-      : '<span class="badge b-warn">미설정</span> <span class="muted">학습기록이 기기별로 따로 저장되고 있습니다.</span>'}</div>
-    <div class="row" style="margin-top:8px">
-      <input type="text" id="sy_repo" value="${esc(SYNC ? SYNC.owner+'/'+SYNC.repo : (GH.owner||'계정')+'/tamgu-records')}" style="width:220px" placeholder="계정/저장소">
-      <input type="password" id="sy_token" placeholder="학습기록 저장소 전용 토큰 (github_pat_…)" style="flex:1;min-width:220px" autocomplete="off">
-      <button class="btn sm pri" id="sy_save">${SYNC?'토큰 변경':'동기화 켜기'}</button></div>
-    <details style="margin-top:6px"><summary class="small">설정 방법 (최초 1회)</summary><ol class="small" style="margin:6px 0 0;padding-left:20px">
-      <li>GitHub에서 <b>비공개(Private)</b> 저장소 <b>tamgu-records</b> 생성 ('Add a README file' 체크)</li>
-      <li>Fine-grained 토큰 발급: Repository access는 <b>tamgu-records만</b>, <b>Contents: Read and write</b></li>
-      <li>위 칸에 붙여넣고 [동기화 켜기] → 모든 사용자에게 자동 적용 (사용자는 별도 설정 불필요)</li></ol>
-      <div class="hint">이 토큰은 학습기록 저장소에만 쓰기 권한이 있어, 문제은행·계정 파일은 변경할 수 없습니다.</div></details>
+    <h3 style="margin:18px 0 8px">🗄 학습기록 DB (Supabase)</h3>
+    <div class="small">${SB.session ? '<span class="badge b-ok">연결됨</span> <span class="muted">모든 사용자의 학습기록이 DB에 저장되고 기기 간에 이어집니다. 사용자별 현황은 [분석] 화면에서 볼 수 있습니다.</span>'
+      : `<span class="badge b-bad">미연결</span> <span class="muted">${esc(SB.error || '로그아웃 후 다시 로그인하면 연결됩니다')}</span>`}</div>
     <h3 style="margin:18px 0 8px">👥 사용자 관리</h3><div id="userlist" class="small muted">불러오는 중…</div>
     <div class="row" style="margin-top:10px">
       <input type="text" id="nu_id" placeholder="아이디 (영문·숫자)" style="width:150px" autocomplete="off">
@@ -1268,6 +1290,8 @@ async function login(id, pw, remember){
     catch(e){ GH.token = ''; }
   }
   saveGH();
+  // 학습기록 DB 로그인 (실패해도 사이트는 사용 가능, 기록은 기기에 보관)
+  try{ await sbLogin(id, pw, remember); }catch(e){ SB.error = e.message; console.warn(e); }
 }
 /* 현재 연결된 게시 권한(토큰)을 내 계정에 암호화 저장 → 다른 기기에서 로그인만 하면 자동 연결 */
 async function saveTokenToAccount(pw){
@@ -1288,7 +1312,7 @@ async function saveTokenToAccount(pw){
 }
 async function restoreAuth(){
   try{ const s = sessionStorage.getItem(AUTH_KEY) || localStorage.getItem(AUTH_KEY); if(!s) return false;
-       const j = JSON.parse(s); await setAuth(j.id, j.role, b64d(j.k), null); return true; }catch(e){ return false; }
+       const j = JSON.parse(s); await setAuth(j.id, j.role, b64d(j.k), null); sbRestore(); return true; }catch(e){ return false; }
 }
 function enterApp(){
   LS_KEY = LS_BASE + ':' + AUTH.id;
@@ -1302,15 +1326,17 @@ function enterApp(){
   $('#nav').hidden = false;
   $('#userbox').innerHTML = `<span>👤 <b>${esc(AUTH.id)}</b>${AUTH.role==='admin'?' <span class="badge b-pri">관리자</span>':''}</span><button class="btn sm" id="logout">로그아웃</button>`;
   $('#logout').onclick = logout;
-  setSyncStatus(SYNC ? 'idle' : 'off');
+  setSyncStatus(SB.session ? 'idle' : 'off');
   current = 'home'; go('home'); syncSharedBank(false);
-  initRecordSync(AUTH.users).then(()=>syncRecords());
+  if(SB.error) toast('학습기록 DB 연결 안 됨 (기록은 이 기기에 보관): ' + SB.error, 9000);
+  AUTH.users = null; anaF.user = AUTH.id; syncRecords();
 }
 async function logout(){
   if(current==='quiz' && session && !session.done && !confirm('풀이 중인 세션을 종료하고 로그아웃할까요?')) return;
   clearInterval(timerId); session = null;
-  if(SYNC){ setSyncStatus('busy'); try{ await Promise.race([syncRecords(), new Promise(r=>setTimeout(r, 8000))]); }catch(e){} }
-  SYNC = null; clearTimeout(scheduleRecordSync._t);
+  clearTimeout(scheduleRecordSync._t);
+  if(SB.session){ setSyncStatus('busy'); try{ await Promise.race([syncRecords(), new Promise(r=>setTimeout(r, 8000))]); }catch(e){} }
+  await sbLogout();
   try{ sessionStorage.removeItem(AUTH_KEY); localStorage.removeItem(AUTH_KEY); }catch(e){}
   GH.token = ''; GH.verified = false; GH.inAccount = false; saveGH();     // 게시 권한도 함께 해제 (다음 로그인 때 계정에서 다시 연결)
   AUTH = null; DB = {questions:[], attempts:[], wrong:{}, settings:null, sharedHash:null}; current = 'login';
@@ -1349,35 +1375,23 @@ async function renderUserList(){
   const el = $('#userlist'); if(!el) return;
   try{
     const cur = await ghGetFile('users.json'); const U = cur ? JSON.parse(td.decode(cur.buf)) : {users:{}};
-    const ids = Object.keys(U.users);
-    el.innerHTML = `<div class="tbl"><table><tr><th>아이디</th><th>권한</th><th>등록일</th><th></th></tr>${ids.map(id=>`<tr><td>${esc(id)}${id===AUTH.id?' <span class="badge b-mute">나</span>':''}</td>
-      <td>${U.users[id].role==='admin'?'관리자':'일반'}</td><td>${esc((U.users[id].updated||U.users[id].created||'').slice(0,10))}</td>
+    const ids = Object.keys(U.users), mem = await loadMembers() || [];
+    const dbState = id => { const m = mem.find(x=>x.login_id===id); return !SB.session ? '-' : !m ? '<span class="badge b-bad">미등록</span>' : !m.active ? '<span class="badge b-mute">비활성</span>' : m.user_id ? '<span class="badge b-ok">연결됨</span>' : '<span class="badge b-warn">첫 로그인 대기</span>'; };
+    el.innerHTML = `<div class="tbl"><table><tr><th>아이디</th><th>권한</th><th>학습기록 DB</th><th>등록일</th><th></th></tr>${ids.map(id=>`<tr><td>${esc(id)}${id===AUTH.id?' <span class="badge b-mute">나</span>':''}</td>
+      <td>${U.users[id].role==='admin'?'관리자':'일반'}</td><td>${dbState(id)}</td><td>${esc((U.users[id].updated||U.users[id].created||'').slice(0,10))}</td>
       <td class="num">${id===AUTH.id?'':`<button class="btn sm danger" data-deluser="${esc(id)}">삭제</button>`}</td></tr>`).join('')}</table></div>`;
     el.querySelectorAll('[data-deluser]').forEach(b=>b.onclick=async()=>{
       const id = b.dataset.deluser; if(!confirm(`사용자 '${id}'를 삭제할까요?`)) return;
       b.disabled = true;
-      try{ await editUsers(U=>{ delete U.users[id]; }, `사용자 삭제: ${id}`); toast(`'${id}' 삭제 완료 (1~2분 후 반영)`, 5000); renderUserList(); }
+      try{ await editUsers(U=>{ delete U.users[id]; }, `사용자 삭제: ${id}`);
+           let dbMsg = ''; if(SB.session){ try{ await sbFetch('/rest/v1/rpc/admin_deactivate_member', {method:'POST', body:{p_login:id}}); }catch(e){ dbMsg = ' · ⚠ DB 비활성화 실패: ' + e.message; } }
+           SB.members = null; toast(`'${id}' 삭제 완료 (1~2분 후 반영, 학습기록은 DB에 보존)${dbMsg}`, 6000); renderUserList(); }
       catch(e){ toast('삭제 실패: '+e.message, 6000); b.disabled = false; }
     });
   }catch(e){ el.textContent = '사용자 목록을 불러오지 못했습니다: ' + e.message; }
 }
 function bindUserAdmin(){
   renderUserList();
-  const sb = $('#sy_save');
-  if(sb) sb.onclick = async ()=>{
-    const [owner, repo] = $('#sy_repo').value.trim().split('/').map(x=>x&&x.trim()), token = $('#sy_token').value.trim();
-    if(!owner || !repo || !token) return toast('저장소(계정/이름)와 토큰을 입력하세요');
-    sb.disabled = true; sb.textContent = '확인 중…';
-    try{
-      const cfg = {owner, repo, branch:'main', token};
-      const j = await (await gh('', {cfg})).json(); cfg.branch = j.default_branch || 'main';
-      if(j.permissions && !j.permissions.push) throw new Error('토큰에 학습기록 저장소 쓰기 권한이 없습니다');
-      const {iv, ct} = await aesEnc(AUTH.key, te.encode(token));
-      await editUsers(U=>{ U.sync = {owner, repo, branch:cfg.branch, iv:b64e(iv), ct:b64e(ct), updated:new Date().toISOString()}; }, '학습기록 동기화 설정');
-      SYNC = cfg; toast('학습기록 동기화를 켰습니다. 모든 사용자에게 적용됩니다', 6000);
-      await syncRecords(); viewUpload();
-    }catch(e){ toast('설정 실패: '+e.message, 8000); sb.disabled = false; sb.textContent = '동기화 켜기'; }
-  };
   const add = $('#nu_add'); if(!add) return;
   add.onclick = async ()=>{
     const id = $('#nu_id').value.trim().toLowerCase(), pw = $('#nu_pw').value, role = $('#nu_role').value;
@@ -1392,7 +1406,19 @@ function bindUserAdmin(){
         U.users[id] = {role: self ? (U.users[id]?.role||role) : role, ...w.entry, created: U.users[id]?.created || new Date().toISOString(), updated: new Date().toISOString()}; },
         `사용자 추가/비밀번호 변경: ${id}`);
       if(newKek) AUTH.kek = newKek;
-      toast(`'${id}' ${existed?'비밀번호를 재설정':'사용자를 추가'}했습니다 (1~2분 후 로그인 가능)`, 6000);
+      let dbMsg = '';
+      if(SB.session){
+        try{
+          if(self) await sbFetch('/auth/v1/user', {method:'PUT', body:{password:pw}});
+          else {
+            await sbFetch('/rest/v1/rpc/admin_upsert_member', {method:'POST', body:{p_login:id, p_role:role}});
+            try{ await sbFetch('/rest/v1/rpc/admin_set_password', {method:'POST', body:{p_login:id, p_password:pw}}); }
+            catch(e){ if(!/no account/i.test(e.message)) throw e; }          // 아직 첫 로그인 전이면 로그인 시 자동 생성
+          }
+        }catch(e){ dbMsg = ' · ⚠ DB 반영 실패: ' + e.message; }
+      } else dbMsg = ' · ⚠ DB 미연결: 학습기록 DB에는 반영되지 않았습니다';
+      SB.members = null;
+      toast(`'${id}' ${existed?'비밀번호를 재설정':'사용자를 추가'}했습니다 (1~2분 후 로그인 가능)${dbMsg}`, dbMsg ? 10000 : 6000);
       $('#nu_id').value = ''; $('#nu_pw').value = ''; renderUserList();
     }catch(e){ toast('실패: '+e.message, 6000); }
     add.disabled = false; add.textContent = '추가 / 비밀번호 재설정';
@@ -1400,32 +1426,160 @@ function bindUserAdmin(){
 }
 
 /* =========================================================
-   16. 학습기록 기기 간 동기화
-   - 사용자별 records/<아이디>.json (AES-256-GCM 암호화)을 비공개 저장소(tamgu-records)에 저장
-   - 동기화 토큰은 users.json에 데이터 키로 암호화 보관 → 로그인한 사용자만 사용 가능
-   - 병합: 풀이기록은 합집합, 오답노트·개인문제·설정은 최근 수정 우선, 삭제·초기화는 시각으로 반영
+   16. 학습기록 DB (Supabase)
+   - 사이트 로그인과 동시에 DB 인증 계정에 로그인 (첫 로그인 시 자동 생성 → 관리자가 등록한 회원과 연결)
+   - 풀이기록·오답노트·설정·개인문제·건너뛴 문제를 DB에 저장, 행 수준 보안(RLS)으로 본인 데이터만 접근
+   - 로컬(브라우저)은 오프라인 캐시: 접속 시 DB와 병합 후 차이만 업로드
    ========================================================= */
-let SYNC = null;              // {owner, repo, branch, token}
+const SB_URL = 'https://iyigdxfgrmbywblhupwg.supabase.co';
+const SB_KEY = 'sb_publishable__j3hsmgr1d47EZBFb_ygPA_l15dQdpF';      // 공개용 키 (데이터 접근은 RLS로 통제)
+const SB_EMAIL = id => `${id}@tamgu-quiz.invalid`;                     // 아이디 → DB 인증 주소 (메일 수신이 불가능한 예약 도메인)
+const SB_STORE = 'tamgu_sb';
+const SB = {session:null, role:null, error:null, noSkipTable:false, members:null};
 const SYNC_STATE = {busy:false, again:false, last:0, error:null};
-async function initRecordSync(U){
-  SYNC = null;
-  try{ U = U || await fetchUsers();
-       if(U.sync){ SYNC = {owner:U.sync.owner, repo:U.sync.repo, branch:U.sync.branch||'main',
-                           token: td.decode(await aesDec(AUTH.key, b64d(U.sync.iv), b64d(U.sync.ct)))}; } }
-  catch(e){ SYNC = null; }
-  if(AUTH) AUTH.users = null;
-  setSyncStatus(SYNC ? 'idle' : 'off');
+let ANA_CACHE = {};
+const iso = t => new Date(t).toISOString();
+const ms = v => v ? Date.parse(v) : 0;
+
+async function sbFetch(path, {method='GET', body, headers={}, auth=true} = {}){
+  if(auth) await sbEnsure();
+  const h = {apikey:SB_KEY, ...headers};
+  if(body !== undefined) h['Content-Type'] = 'application/json';
+  if(auth && SB.session) h.Authorization = 'Bearer ' + SB.session.access_token;
+  const r = await fetch(SB_URL + path, {method, headers:h, body: body!==undefined ? JSON.stringify(body) : undefined, cache:'no-store'});
+  const txt = await r.text(); let j = null; try{ j = txt ? JSON.parse(txt) : null; }catch(e){}
+  if(!r.ok){ const e = new Error((j && (j.msg || j.message || j.error_description || j.error)) || ('HTTP ' + r.status)); e.status = r.status; e.code = j && (j.error_code || j.code); throw e; }
+  return j;
 }
+function sbSave(remember){
+  try{ localStorage.removeItem(SB_STORE); sessionStorage.removeItem(SB_STORE);
+       if(SB.session){ const useLocal = remember!=null ? remember : !!localStorage.getItem(AUTH_KEY);
+         (useLocal ? localStorage : sessionStorage).setItem(SB_STORE, JSON.stringify({s:SB.session, role:SB.role})); } }catch(e){}
+}
+function sbSetSession(s, remember){
+  SB.session = s && s.access_token ? {access_token:s.access_token, refresh_token:s.refresh_token,
+    expires_at: s.expires_at || Math.floor(Date.now()/1000) + (s.expires_in||3600), user_id: s.user?.id || SB.session?.user_id} : null;
+  sbSave(remember);
+}
+async function sbEnsure(){
+  if(!SB.session) throw new Error('DB 미연결');
+  if(SB.session.expires_at*1000 - Date.now() > 90000) return;
+  if(!sbEnsure._p) sbEnsure._p = (async ()=>{
+    try{ sbSetSession(await sbFetch('/auth/v1/token?grant_type=refresh_token', {method:'POST', auth:false, body:{refresh_token:SB.session.refresh_token}})); }
+    catch(e){ if(e.status===400 || e.status===401){ SB.session = null; SB.error = 'DB 로그인이 만료되었습니다. 다시 로그인하세요'; sbSave(); } throw e; }
+    finally{ sbEnsure._p = null; }
+  })();
+  await sbEnsure._p;
+}
+async function sbLogin(id, pw, remember){
+  SB.error = null; SB.role = null; const email = SB_EMAIL(id); let s;
+  try{ s = await sbFetch('/auth/v1/token?grant_type=password', {method:'POST', auth:false, body:{email, password:pw}}); }
+  catch(e){
+    if(!(e.status===400 && (e.code==='invalid_credentials' || /invalid/i.test(e.message)))) throw e;
+    try{ s = await sbFetch('/auth/v1/signup', {method:'POST', auth:false, body:{email, password:pw}}); }      // 첫 로그인: DB 계정 자동 생성
+    catch(e2){ if(e2.code==='user_already_exists' || /already/i.test(e2.message)) throw new Error('DB 계정 비밀번호가 사이트 비밀번호와 다릅니다. 관리자에게 비밀번호 재설정을 요청하세요'); throw e2; }
+    if(!s || !s.access_token) throw new Error('DB 계정은 만들었지만 세션을 받지 못했습니다 (Supabase의 Confirm email 설정을 꺼 주세요)');
+  }
+  sbSetSession(s, remember);
+  try{ SB.role = await sbFetch('/rest/v1/rpc/claim_member', {method:'POST', body:{}}); }
+  catch(e){ sbSetSession(null); throw new Error('DB 회원으로 등록되지 않은 아이디입니다. 관리자에게 등록을 요청하세요'); }
+  sbSave(remember);
+}
+function sbRestore(){
+  try{ const v = sessionStorage.getItem(SB_STORE) || localStorage.getItem(SB_STORE);
+       if(v){ const j = JSON.parse(v); SB.session = j.s; SB.role = j.role; } }catch(e){}
+}
+async function sbLogout(){
+  if(SB.session){ try{ await sbFetch('/auth/v1/logout?scope=local', {method:'POST', body:{}}); }catch(e){} }
+  SB.session = null; SB.role = null; SB.error = null; SB.members = null; ANA_CACHE = {}; sbSave();
+}
+async function sbAll(table, query){
+  const out = [];
+  for(let off=0; ; off+=1000){
+    const rows = await sbFetch(`/rest/v1/${table}?${query}`, {headers:{'Range-Unit':'items', Range:`${off}-${off+999}`}});
+    out.push(...rows); if(rows.length < 1000) break;
+  }
+  return out;
+}
+async function sbUpsert(table, rows, conflict){
+  for(let i=0; i<rows.length; i+=500)
+    await sbFetch(`/rest/v1/${table}?on_conflict=${conflict}`, {method:'POST', body:rows.slice(i, i+500), headers:{Prefer:'resolution=merge-duplicates,return=minimal'}});
+}
+const isMissingTable = e => e.status===404 || e.code==='PGRST205' || e.code==='42P01';
+
+/* DB 행 ↔ 앱 기록 변환 */
+function rowToAttempt(r){
+  return {qid:r.question_id, subject:r.subject, unit:r.unit, subunit:r.subunit||'', type:r.q_type, difficulty:r.difficulty, points:Number(r.points)||0,
+          score:Number(r.score), answer:r.answer, time:r.time_sec||0, ts:ms(r.answered_at), sid:r.session_id, ...(r.appealed?{appealed:true}:{}), k:r.client_key, mt:ms(r.updated_at)};
+}
+function attemptToRow(a, uid){
+  return {user_id:uid, client_key:a.k, question_id:String(a.qid), subject:a.subject||'', unit:a.unit||'', subunit:a.subunit||null,
+          q_type: TYPES.includes(a.type) ? a.type : '객관식', difficulty: DIFFS.includes(a.difficulty) ? a.difficulty : null,
+          points: Number(a.points)||null, score: Math.max(0, Math.min(1, Number(a.score)||0)), answer: a.answer==null ? null : String(a.answer),
+          time_sec: Math.max(0, Math.round(a.time||0)), session_id: a.sid||null, appealed: !!a.appealed, answered_at: iso(a.ts), updated_at: iso(a.mt||a.ts)};
+}
+async function dbPull(uid){
+  const q = `user_id=eq.${uid}`;
+  const [A, W, S, P, K] = await Promise.all([
+    sbAll('attempts', `select=*&${q}&order=id.asc`),
+    sbAll('wrong_notes', `select=*&${q}&order=question_id.asc`),
+    sbFetch(`/rest/v1/user_settings?select=*&${q}`),
+    sbAll('personal_questions', `select=*&${q}&order=question_id.asc`),
+    SB.noSkipTable ? [] : sbAll('skipped_questions', `select=*&${q}&order=question_id.asc`).catch(e=>{ if(isMissingTable(e)){ SB.noSkipTable = true; return []; } throw e; })
+  ]);
+  const R = {attempts:A.map(rowToAttempt), wrong:{}, questions:[], qTomb:{}, skips:{}, settings:null, settingsMt:0, resetAt:0};
+  W.forEach(w=>{ R.wrong[w.question_id] = w.deleted ? {deleted:true, mt:ms(w.updated_at)}
+                 : {count:w.wrong_count, lastTs:ms(w.last_wrong_at), cleared:w.cleared, starred:w.starred, mt:ms(w.updated_at)}; });
+  if(S && S[0]){ R.settings = S[0].settings; R.settingsMt = ms(S[0].settings_updated_at); R.resetAt = ms(S[0].reset_at); }
+  P.forEach(r=>{ const mt = ms(r.updated_at); if(r.deleted) R.qTomb[r.question_id] = mt; else if(r.data) R.questions.push({...r.data, id:r.question_id, mt}); });
+  K.forEach(k=>{ R.skips[k.question_id] = k.deleted ? {deleted:true, mt:ms(k.updated_at)} : {ts:ms(k.skipped_at), mt:ms(k.updated_at)}; });
+  return R;
+}
+async function dbPush(M, R, uid){
+  // 풀이기록: 새 기록 또는 수정된 기록(정답 인정 등)만
+  const Ra = new Map(R.attempts.map(a=>[a.k, a]));
+  const aRows = M.attempts.filter(a=>{ const r = Ra.get(a.k); return !r || (a.mt||a.ts) > (r.mt||0); }).map(a=>attemptToRow(a, uid));
+  if(aRows.length) await sbUpsert('attempts', aRows, 'user_id,client_key');
+  // 학습기록 초기화: 초기화 시점 이전 기록 삭제
+  if(M.resetAt && (M.resetAt > (R.resetAt||0) || R.attempts.some(a=>a.ts < M.resetAt))){
+    const t = encodeURIComponent(iso(M.resetAt));
+    await sbFetch(`/rest/v1/attempts?user_id=eq.${uid}&answered_at=lt.${t}`, {method:'DELETE', headers:{Prefer:'return=minimal'}});
+    await sbFetch(`/rest/v1/wrong_notes?user_id=eq.${uid}&updated_at=lt.${t}`, {method:'DELETE', headers:{Prefer:'return=minimal'}});
+  }
+  // 오답노트
+  const wsig = w => !w ? '' : w.deleted ? 'D'+(w.mt||0) : [w.count||0, w.lastTs||0, !!w.cleared, !!w.starred, w.mt||0].join('|');
+  const wRows = Object.entries(M.wrong).filter(([id,w])=>wsig(w)!==wsig(R.wrong[id])).map(([id,w])=>({user_id:uid, question_id:id,
+    wrong_count: w.deleted ? 0 : (w.count||0), last_wrong_at: w.lastTs ? iso(w.lastTs) : null, cleared:!!w.cleared, starred:!!w.starred, deleted:!!w.deleted, updated_at: iso(w.mt||Date.now())}));
+  if(wRows.length) await sbUpsert('wrong_notes', wRows, 'user_id,question_id');
+  // 설정 · 초기화 시점
+  if((M.settingsMt||0) !== (R.settingsMt||0) || (M.resetAt||0) !== (R.resetAt||0))
+    await sbUpsert('user_settings', [{user_id:uid, settings:M.settings||null, settings_updated_at: M.settingsMt ? iso(M.settingsMt) : null,
+                                       reset_at: M.resetAt ? iso(M.resetAt) : null, updated_at: iso(Date.now())}], 'user_id');
+  // 개인 문제
+  const Rq = new Map(R.questions.map(q=>[q.id, q])), live = new Set(M.questions.map(q=>q.id));
+  const pRows = M.questions.filter(q=>{ const r = Rq.get(q.id); return !r || (q.mt||0) > (r.mt||0); })
+    .map(q=>{ const d = {...q}; delete d.mt; delete d.src; return {user_id:uid, question_id:q.id, data:d, deleted:false, updated_at:iso(q.mt||Date.now())}; });
+  Object.entries(M.qTomb||{}).forEach(([id,t])=>{ if(!live.has(id) && (R.qTomb[id]||0) < t) pRows.push({user_id:uid, question_id:id, data:null, deleted:true, updated_at:iso(t)}); });
+  if(pRows.length) await sbUpsert('personal_questions', pRows, 'user_id,question_id');
+  // 건너뛴 문제
+  if(!SB.noSkipTable){
+    const ksig = k => !k ? '' : k.deleted ? 'D'+(k.mt||0) : 'S'+(k.ts||0)+'|'+(k.mt||0);
+    const kRows = Object.entries(M.skips||{}).filter(([id,k])=>ksig(k)!==ksig(R.skips[id])).map(([id,k])=>({user_id:uid, question_id:id,
+      skipped_at: iso(k.ts||k.mt||Date.now()), deleted:!!k.deleted, updated_at: iso(k.mt||Date.now())}));
+    if(kRows.length) try{ await sbUpsert('skipped_questions', kRows, 'user_id,question_id'); }catch(e){ if(isMissingTable(e)) SB.noSkipTable = true; else throw e; }
+  }
+}
+
 function setSyncStatus(st){
-  const el = $('#syncst') || (()=>{ const ub = $('#userbox'); if(!ub || !AUTH) return null; const s = document.createElement('span'); s.id = 'syncst'; s.className = 'small'; ub.prepend(s); return s; })();
+  const el = $('#syncst') || (()=>{ const ub = $('#userbox'); if(!ub || !AUTH) return null; const sp = document.createElement('span'); sp.id = 'syncst'; sp.className = 'small'; ub.prepend(sp); return sp; })();
   if(!el) return;
   const t = SYNC_STATE.last ? new Date(SYNC_STATE.last).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}) : '';
-  el.innerHTML = st==='off' ? '<span title="학습기록이 이 기기에만 저장됩니다">💾 기기 저장</span>'
-    : st==='busy' ? '☁ 동기화 중…'
-    : st==='error' ? `<span style="color:var(--bad)" title="${esc(SYNC_STATE.error||'')}">⚠ 동기화 실패</span>`
-    : `<span title="학습기록이 모든 기기에 동기화됩니다">☁ 동기화됨${t?' '+t:''}</span>`;
+  el.innerHTML = st==='off' ? `<span title="${esc(SB.error||'학습기록 DB에 연결되지 않아 이 기기에만 저장됩니다')}">💾 기기 저장${SB.error?' ⚠':''}</span>`
+    : st==='busy' ? '🗄 저장 중…'
+    : st==='error' ? `<span style="color:var(--bad)" title="${esc(SYNC_STATE.error||'')}">⚠ DB 저장 실패</span>`
+    : `<span title="학습기록이 DB에 저장되어 모든 기기에서 이어집니다">🗄 DB 저장됨${t?' '+t:''}</span>`;
 }
-function scheduleRecordSync(){ if(!SYNC) return; clearTimeout(scheduleRecordSync._t); scheduleRecordSync._t = setTimeout(syncRecords, 4000); }
+function scheduleRecordSync(){ if(!SB.session) return; clearTimeout(scheduleRecordSync._t); scheduleRecordSync._t = setTimeout(syncRecords, 3000); }
 function localRecord(){
   return {attempts:DB.attempts, wrong:DB.wrong, questions:DB.questions.filter(q=>q.src!=='shared').map(q=>{ const c = {...q}; delete c.src; return c; }),
           qTomb:DB.qTomb||{}, skips:DB.skips||{}, settings:DB.settings, settingsMt:DB.settingsMt||0, resetAt:DB.resetAt||0};
@@ -1454,37 +1608,32 @@ function mergeRecords(L, R){
 }
 const recordJSON = r => JSON.stringify({attempts:r.attempts, wrong:sortObj(r.wrong), questions:[...(r.questions||[])].sort((x,y)=>x.id<y.id?-1:1), qTomb:sortObj(r.qTomb), skips:sortObj(r.skips), settings:r.settings, settingsMt:r.settingsMt||0, resetAt:r.resetAt||0});
 async function syncRecords(){
-  if(!AUTH || !SYNC) return;
+  if(!AUTH || !SB.session) return;
   if(SYNC_STATE.busy){ SYNC_STATE.again = true; return; }
   SYNC_STATE.busy = true; setSyncStatus('busy');
-  const path = `records/${AUTH.id}.json`, me = AUTH.id;
+  const me = AUTH.id, uid = SB.session.user_id;
   try{
-    for(let attempt=0; ; attempt++){
-      const cur = await ghGetFile(path, SYNC);
-      let remote = {};
-      if(cur){ const j = JSON.parse(td.decode(cur.buf)); remote = JSON.parse(td.decode(await aesDec(AUTH.key, b64d(j.iv), b64d(j.ct)))); }
-      if(!AUTH || AUTH.id!==me) return;                                  // 동기화 중 로그아웃
-      const before = recordJSON(localRecord());
-      const shared = DB.questions.filter(q=>q.src==='shared'), sids = new Set(shared.map(q=>q.id));
-      const merged = mergeRecords(localRecord(), remote);
-      merged.questions = merged.questions.filter(q=>!sids.has(q.id));      // 공용으로 게시된 문항은 개인 목록에서 제외
-      const mergedStr = recordJSON(merged);
-      DB.attempts = merged.attempts; DB.wrong = merged.wrong; DB.qTomb = merged.qTomb; DB.resetAt = merged.resetAt;
-      DB.settings = merged.settings; DB.settingsMt = merged.settingsMt; DB.skips = merged.skips;
-      DB.questions = [...shared, ...merged.questions.filter(q=>!sids.has(q.id))];
-      saveDB();
-      const incoming = mergedStr !== before;
-      if(!cur || mergedStr !== recordJSON(remote)){
-        const {iv, ct} = await aesEnc(AUTH.key, te.encode(JSON.stringify({v:1, updated:new Date().toISOString(), ...merged})));
-        try{ await ghPutFile(path, b64e(te.encode(JSON.stringify({v:1, alg:'AES-256-GCM', iv:b64e(iv), ct:b64e(ct)}))), cur?.sha, `기록 동기화: ${me}`, SYNC); }
-        catch(e){ if((e.status===409 || e.status===422) && attempt < 2) continue; throw e; }
-      }
-      SYNC_STATE.last = Date.now(); SYNC_STATE.error = null; setSyncStatus('idle');
-      if(incoming && ['home','analysis','wrong','upload','setup'].includes(current)) VIEWS[current]();
-      break;
-    }
-  }catch(e){ console.warn(e); SYNC_STATE.error = e.message; setSyncStatus('error'); }
+    const R = await dbPull(uid);
+    if(!AUTH || AUTH.id!==me) return;                                       // 동기화 중 로그아웃
+    const before = recordJSON(localRecord());
+    const shared = DB.questions.filter(q=>q.src==='shared'), sids = new Set(shared.map(q=>q.id));
+    const merged = mergeRecords(localRecord(), R);
+    merged.questions = merged.questions.filter(q=>!sids.has(q.id));          // 공용으로 게시된 문항은 개인 목록에서 제외
+    DB.attempts = merged.attempts; DB.wrong = merged.wrong; DB.qTomb = merged.qTomb; DB.resetAt = merged.resetAt;
+    DB.settings = merged.settings; DB.settingsMt = merged.settingsMt; DB.skips = merged.skips;
+    DB.questions = [...shared, ...merged.questions];
+    saveDB();
+    const incoming = recordJSON(merged) !== before;
+    await dbPush(merged, R, uid);
+    SYNC_STATE.last = Date.now(); SYNC_STATE.error = null; setSyncStatus('idle');
+    if(incoming && ['home','analysis','wrong','upload','setup'].includes(current)) VIEWS[current]();
+  }catch(e){ console.warn(e); SYNC_STATE.error = e.message; setSyncStatus(SB.session ? 'error' : 'off'); }
   finally{ SYNC_STATE.busy = false; if(SYNC_STATE.again){ SYNC_STATE.again = false; setTimeout(syncRecords, 500); } }
+}
+async function loadMembers(){
+  if(!SB.session || AUTH.role!=='admin') return null;
+  try{ SB.members = await sbFetch('/rest/v1/members?select=login_id,role,user_id,active&order=login_id.asc'); }catch(e){ SB.members = null; }
+  return SB.members;
 }
 function removeLocalQ(pred){
   DB.qTomb = DB.qTomb || {}; const t = Date.now();
