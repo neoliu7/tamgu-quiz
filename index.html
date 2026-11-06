@@ -122,6 +122,12 @@ details summary{cursor:pointer;color:var(--primary)}
 .login input[type=text],.login input[type=password]{width:100%;margin-bottom:10px;padding:11px 12px}
 .login .btn{width:100%;justify-content:center;padding:11px}
 [hidden]{display:none!important}
+.logtbl tr.logrow{cursor:pointer} .logtbl tr.logrow:hover td{background:var(--surface2)} .logtbl tr.logrow.open td{background:var(--primary-weak)}
+.logtbl tr.logday td{background:var(--surface2);border-bottom:1px solid var(--line);padding:6px}
+.logtbl tr.logdetail td{background:var(--surface2);padding:12px 14px}
+.logq .qimg{max-width:420px}
+.logtbl td:nth-child(1),.logtbl td:nth-child(4),.logtbl td:nth-child(7),.logtbl td:nth-child(8){white-space:nowrap}
+.logtbl td:nth-child(2){min-width:110px} .logtbl td:nth-child(3){min-width:220px} .logtbl tr.logday td,.logtbl tr.logdetail td{white-space:normal}
 #userbox{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
 </style>
 </head>
@@ -133,6 +139,7 @@ details summary{cursor:pointer;color:var(--primary)}
     <button data-v="setup">문제풀기</button>
     <button data-v="analysis">분석</button>
     <button data-v="wrong">오답노트</button>
+    <button data-v="log">풀이기록</button>
     <button data-v="upload">문제관리</button>
   </nav>
   <div id="userbox"></div>
@@ -250,7 +257,7 @@ const openWrong = () => Object.entries(DB.wrong).filter(([id,w])=>!w.deleted && 
    4. 라우팅
    ========================================================= */
 let current = 'home', session = null, timerId = null, charts = [];
-const VIEWS = {home:viewHome, upload:viewUpload, setup:viewSetup, quiz:viewQuiz, result:viewResult, analysis:viewAnalysis, wrong:viewWrong};
+const VIEWS = {home:viewHome, upload:viewUpload, setup:viewSetup, quiz:viewQuiz, result:viewResult, analysis:viewAnalysis, wrong:viewWrong, log:viewLog};
 function go(v){
   if(!AUTH) return viewLogin();
   if(current==='quiz' && v!=='quiz' && v!=='result' && session && !session.done){
@@ -534,7 +541,7 @@ function exportBank(){
 }
 function exportBackup(){
   const blob = new Blob([JSON.stringify({app:'tamgu-quiz',version:1,exportedAt:new Date().toISOString(),...DB})], {type:'application/json'});
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `탐구문제_백업_${dayKey(Date.now())}.json`; a.click();
+  saveBlob(blob, `탐구문제_백업_${dayKey(Date.now())}.json`);
 }
 async function importBackup(f){
   try{ const d = JSON.parse(await f.text());
@@ -966,6 +973,140 @@ function viewWrong(){
   $('#wc').onchange = e=>{ wrongF.showCleared = e.target.checked; viewWrong(); };
   document.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{ DB.wrong[b.dataset.rm] = {deleted:true, mt:Date.now()}; saveDB(); scheduleRecordSync(); viewWrong(); });
   renderMath($('#app')); hydrateImages($('#app'));
+}
+
+/* =========================================================
+   11-1. 풀이기록 (이벤트 로그) 조회
+   - 풀이(정답·오답·부분)와 건너뛰기 이벤트를 시간순으로 조회 · 필터 · 상세 · CSV 내보내기
+   - 관리자는 다른 사용자의 풀이기록도 조회 (DB 연결 시)
+   ========================================================= */
+let logF = {days:7, from:'', to:'', subject:'', result:'', type:'', q:'', user:null, limit:50};
+function logEvents(source, own){
+  const ev = source.map(a=>({kind:'answer', ts:a.ts, qid:a.qid, subject:a.subject, unit:a.unit, type:a.type, difficulty:a.difficulty,
+    answer:a.answer, score:a.score, time:a.time||0, sid:a.sid, appealed:a.appealed, points:a.points}));
+  if(own) for(const [id,k] of Object.entries(DB.skips||{})){
+    if(k.deleted) continue; const q = DB.questions.find(x=>x.id===id);
+    ev.push({kind:'skip', ts:k.ts||k.mt, qid:id, subject:q?.subject||'', unit:q?.unit||'', type:q?.type||'', difficulty:q?.difficulty||'', time:0});
+  }
+  return ev.sort((x,y)=>y.ts-x.ts);
+}
+const resultOf = e => e.kind==='skip' ? 'skip' : e.score>=1 ? 'ok' : e.score>0 ? 'part' : 'bad';
+const RESULT_LABEL = {ok:['정답','b-ok'], part:['부분','b-warn'], bad:['오답','b-bad'], skip:['건너뜀','b-mute']};
+function answerText(q, ans, isCorrect){
+  if(ans==null || ans==='') return '<span class="muted">-</span>';
+  if(q && q.type==='객관식'){ const i = +ans-1; return `${CIRCLED[i]||esc(ans)} ${q.choices && q.choices[i]?`<span class="muted small">${esc(String(q.choices[i]).slice(0,30))}</span>`:''}`; }
+  const t = String(ans); return esc(isCorrect ? t.split('|')[0] : t.length>40 ? t.slice(0,40)+'…' : t);
+}
+function filteredLog(events){
+  const now = Date.now(), from = logF.from ? new Date(logF.from+'T00:00:00').getTime() : (logF.days ? now - logF.days*86400000 : 0);
+  const to = logF.to ? new Date(logF.to+'T23:59:59.999').getTime() : Infinity;
+  const qmap = new Map(DB.questions.map(q=>[q.id,q])), kw = logF.q.trim().toLowerCase();
+  return events.filter(e=>e.ts>=from && e.ts<=to && (!logF.subject || e.subject===logF.subject) && (!logF.type || e.type===logF.type)
+    && (!logF.result || resultOf(e)===logF.result)
+    && (!kw || String(e.qid).toLowerCase().includes(kw) || (qmap.get(e.qid)?.text||'').toLowerCase().includes(kw) || (e.unit||'').toLowerCase().includes(kw)));
+}
+function viewLog(){
+  const isAdm = AUTH.role==='admin' && !!SB.session;
+  if(!logF.user || !isAdm) logF.user = AUTH.id;
+  const other = logF.user !== AUTH.id;
+  if(isAdm && !SB.members){ loadMembers().then(m=>{ if(m && current==='log') viewLog(); }); }
+  let source = DB.attempts;
+  if(other){
+    source = ANA_CACHE[logF.user];
+    if(!source){ $('#app').innerHTML = `<h2>풀이기록</h2><div class="card empty"><p>'${esc(logF.user)}'의 풀이기록을 불러오는 중…</p></div>`;
+      loadUserAttempts(logF.user).then(()=>{ if(current==='log') viewLog(); }).catch(e=>{ toast('불러오기 실패: '+e.message, 6000); logF.user = AUTH.id; viewLog(); }); return; }
+  }
+  const events = logEvents(source, !other);
+  const subs = [...new Set(events.map(e=>e.subject).filter(Boolean))].sort();
+  const userSel = isAdm ? `<select id="lu">${(SB.members||[{login_id:AUTH.id, user_id:1}]).filter(m=>m.active!==false).map(m=>`<option value="${esc(m.login_id)}" ${logF.user===m.login_id?'selected':''}>👤 ${esc(m.login_id)}${m.login_id===AUTH.id?' (나)':''}${m.user_id?'':' · 미접속'}</option>`).join('')}</select>` : '';
+  const opt = (v,l,cur) => `<option value="${esc(v)}" ${cur===v?'selected':''}>${esc(l)}</option>`;
+  $('#app').innerHTML = `<div class="row" style="margin-bottom:14px"><h2 style="margin:0">풀이기록${other?` <span class="badge b-warn">${esc(logF.user)}</span>`:''}</h2><span class="sp"></span>${userSel}
+      <button class="btn sm" id="lcsv">⬇ CSV 내보내기</button></div>
+    <div class="card"><div class="row">
+      <select id="ld">${[[1,'오늘·최근 1일'],[7,'최근 7일'],[30,'최근 30일'],[90,'최근 90일'],[0,'전체 기간'],['custom','기간 지정']].map(([v,l])=>`<option value="${v}" ${(logF.from||logF.to?'custom':String(logF.days))===String(v)?'selected':''}>${l}</option>`).join('')}</select>
+      <span id="lrange" ${logF.from||logF.to?'':'hidden'}><input type="date" id="lfrom" value="${esc(logF.from)}"> ~ <input type="date" id="lto" value="${esc(logF.to)}"></span>
+      <select id="ls">${opt('','전체 과목',logF.subject)}${subs.map(x=>opt(x,x,logF.subject)).join('')}</select>
+      <select id="lr">${opt('','전체 결과',logF.result)}${Object.entries(RESULT_LABEL).filter(([k])=>!other||k!=='skip').map(([k,[l]])=>opt(k,l,logF.result)).join('')}</select>
+      <select id="lt">${opt('','전체 유형',logF.type)}${TYPES.map(t=>opt(t,t,logF.type)).join('')}</select>
+      <input type="text" id="lq" placeholder="문항ID·문제 내용·단원 검색" value="${esc(logF.q)}" style="flex:1;min-width:180px"></div></div>
+    <div id="logbody"></div>`;
+  const body = ()=>{ logF.limit = 50; renderLogBody(events); };
+  $('#ld').onchange = e=>{ if(e.target.value==='custom'){ $('#lrange').hidden = false; if(!logF.from) logF.from = dayKey(Date.now()-6*86400000); if(!logF.to) logF.to = dayKey(Date.now()); $('#lfrom').value = logF.from; $('#lto').value = logF.to; }
+    else { $('#lrange').hidden = true; logF.from = logF.to = ''; logF.days = +e.target.value; } body(); };
+  $('#lfrom').onchange = e=>{ logF.from = e.target.value; body(); };
+  $('#lto').onchange = e=>{ logF.to = e.target.value; body(); };
+  $('#ls').onchange = e=>{ logF.subject = e.target.value; body(); };
+  $('#lr').onchange = e=>{ logF.result = e.target.value; body(); };
+  $('#lt').onchange = e=>{ logF.type = e.target.value; body(); };
+  $('#lq').oninput = e=>{ logF.q = e.target.value; clearTimeout(viewLog._t); viewLog._t = setTimeout(body, 250); };
+  const lu = $('#lu'); if(lu) lu.onchange = e=>{ logF.user = e.target.value; delete ANA_CACHE[logF.user]; viewLog(); };
+  $('#lcsv').onclick = ()=> exportLogCSV(filteredLog(events));
+  renderLogBody(events);
+}
+function renderLogBody(events){
+  const el = $('#logbody'); if(!el) return;
+  const list = filteredLog(events), qmap = new Map(DB.questions.map(q=>[q.id,q]));
+  const ans = list.filter(e=>e.kind==='answer'), sc = ans.reduce((x,e)=>x+e.score,0);
+  const cnt = k => list.filter(e=>resultOf(e)===k).length;
+  const kpi = `<div class="kpis">
+      <div class="kpi"><div class="l">이벤트</div><div class="v">${list.length}</div></div>
+      <div class="kpi"><div class="l">정답 · 부분 · 오답</div><div class="v" style="font-size:20px">${cnt('ok')} · ${cnt('part')} · ${cnt('bad')}</div></div>
+      <div class="kpi"><div class="l">정답률</div><div class="v">${pct(ans.length ? sc/ans.length : null)}</div></div>
+      <div class="kpi"><div class="l">건너뜀</div><div class="v">${cnt('skip')}</div></div>
+      <div class="kpi"><div class="l">총 풀이시간</div><div class="v">${fmtSec(ans.reduce((x,e)=>x+e.time,0))}</div></div></div>`;
+  if(!list.length){ el.innerHTML = kpi + '<div class="card empty"><p>조건에 맞는 풀이기록이 없습니다.</p></div>'; return; }
+  const shown = list.slice(0, logF.limit);
+  let lastDay = '', rows = '';
+  const byDay = {}; for(const e of list){ const d = dayKey(e.ts); const o = byDay[d] ||= {n:0, a:0, s:0}; o.n++; if(e.kind==='answer'){ o.a++; o.s += e.score; } }
+  shown.forEach((e,i)=>{
+    const d = dayKey(e.ts);
+    if(d!==lastDay){ lastDay = d; const o = byDay[d];
+      rows += `<tr class="logday"><td colspan="8"><b>${d}</b> <span class="muted small">(${['일','월','화','수','목','금','토'][new Date(e.ts).getDay()]}) · ${o.n}건${o.a?` · 정답률 ${pct(o.s/o.a)}`:''}</span></td></tr>`; }
+    const q = qmap.get(e.qid), r = resultOf(e), [rl, rc] = RESULT_LABEL[r];
+    rows += `<tr class="logrow" data-i="${i}">
+      <td class="num">${new Date(e.ts).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})}</td>
+      <td>${esc(e.subject)}<div class="muted small">${esc(e.unit)}</div></td>
+      <td><span class="muted small">${esc(e.qid)}</span><div>${q ? esc(String(q.text).replace(/\s+/g,' ').slice(0,48))+(String(q.text).length>48?'…':'') : '<span class="muted">(삭제된 문항)</span>'}</div></td>
+      <td><span class="small">${esc(e.type)}${e.difficulty?`<div class="muted">난이도 ${esc(e.difficulty)}</div>`:''}</span></td>
+      <td>${e.kind==='skip' ? '<span class="muted">-</span>' : answerText(q || {type:e.type}, e.answer)}</td>
+      <td>${q ? answerText(q, q.answer, true) : '<span class="muted">-</span>'}</td>
+      <td><span class="badge ${rc}">${rl}</span>${e.appealed?' <span class="badge b-pri" title="오채점 이의로 정답 처리">인정</span>':''}</td>
+      <td class="num">${e.kind==='skip'?'-':fmtSec(e.time)}</td></tr>
+      <tr class="logdetail" id="ld${i}" hidden><td colspan="8"></td></tr>`;
+  });
+  el.innerHTML = kpi + `<div class="card"><div class="tbl"><table class="logtbl">
+    <tr><th class="num">시각</th><th>과목·단원</th><th>문항</th><th>유형</th><th>제출 답</th><th>정답</th><th>결과</th><th class="num">소요</th></tr>${rows}</table></div>
+    <div class="row" style="margin-top:10px"><span class="muted small">${shown.length} / ${list.length}건 표시 · 행을 누르면 문제·해설을 볼 수 있습니다</span><span class="sp"></span>
+      ${list.length>shown.length?`<button class="btn sm" id="lmore">더 보기 (${Math.min(50, list.length-shown.length)}건)</button>`:''}</div></div>`;
+  el.querySelectorAll('.logrow').forEach(tr=>tr.onclick=()=>{
+    const i = +tr.dataset.i, d = $('#ld'+i), e = shown[i], q = qmap.get(e.qid);
+    if(!d.hidden){ d.hidden = true; tr.classList.remove('open'); return; }
+    d.hidden = false; tr.classList.add('open');
+    d.firstElementChild.innerHTML = !q ? '<div class="muted small">문항이 문제은행에서 삭제되어 내용을 표시할 수 없습니다.</div>' :
+      `<div class="logq"><div class="small muted">${esc(q.subject)} › ${esc(q.unit)}${q.subunit?' › '+esc(q.subunit):''} · ${esc(q.type)} · 난이도 ${esc(q.difficulty)} · ${q.points}점${e.sid?' · 세션 '+esc(e.sid):''}</div>
+        <div style="margin:6px 0">${qTextHTML(q.text)}</div>${imgHTML(q)}
+        ${q.type==='객관식'?`<div class="small">${q.choices.map((c,k)=>`<span style="margin-right:12px;${String(k+1)===String(q.answer)?'font-weight:700;color:var(--ok)':String(k+1)===String(e.answer)?'color:var(--bad)':''}">${CIRCLED[k]} ${rich(c)}</span>`).join('')}</div>`:''}
+        ${q.type!=='객관식' && e.answer ? `<div class="small" style="margin-top:6px"><b>제출 답:</b> ${rich(e.answer)}</div>`:''}
+        <div class="small"><b>정답:</b> ${q.type==='객관식' ? CIRCLED[+q.answer-1]+' '+rich(q.choices[+q.answer-1]||'') : q.type==='단답형' ? String(q.answer).split('|').map(esc).join(' / ') : rich(q.answer)}</div>
+        ${q.explanation?`<div class="expl small">${rich(q.explanation)}</div>`:''}</div>`;
+    renderMath(d); hydrateImages(d);
+  });
+  const more = $('#lmore'); if(more) more.onclick = ()=>{ logF.limit += 50; renderLogBody(events); };
+}
+function exportLogCSV(list){
+  if(!list.length) return toast('내보낼 기록이 없습니다');
+  const qmap = new Map(DB.questions.map(q=>[q.id,q]));
+  const cell = v => { const t = v==null ? '' : String(v); return /[",\n]/.test(t) ? '"'+t.replace(/"/g,'""')+'"' : t; };
+  const head = ['일시','사용자','과목','단원','문항ID','문제','유형','난이도','제출 답','정답','결과','점수','소요(초)','정답 인정','세션'];
+  const lines = list.map(e=>{ const q = qmap.get(e.qid), d = new Date(e.ts);
+    return [`${dayKey(e.ts)} ${d.toLocaleTimeString('ko-KR',{hour12:false})}`, logF.user, e.subject, e.unit, e.qid, q ? String(q.text).replace(/\s+/g,' ').slice(0,200) : '(삭제된 문항)',
+            e.type, e.difficulty, e.kind==='skip' ? '' : e.answer, q ? q.answer : '', RESULT_LABEL[resultOf(e)][0], e.kind==='skip' ? '' : e.score, e.kind==='skip' ? '' : e.time, e.appealed ? 'Y' : '', e.sid||''].map(cell).join(','); });
+  const blob = new Blob(['﻿' + [head.join(','), ...lines].join('\r\n')], {type:'text/csv;charset=utf-8'});
+  saveBlob(blob, `tamgu-log_${logF.user}_${dayKey(Date.now())}.csv`);   // 기기 호환을 위해 영문 파일명
+}
+function saveBlob(blob, name){
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.style.display = 'none';
+  document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
 
 /* =========================================================
@@ -1491,7 +1632,7 @@ function sbRestore(){
 }
 async function sbLogout(){
   if(SB.session){ try{ await sbFetch('/auth/v1/logout?scope=local', {method:'POST', body:{}}); }catch(e){} }
-  SB.session = null; SB.role = null; SB.error = null; SB.members = null; ANA_CACHE = {}; sbSave();
+  SB.session = null; SB.role = null; SB.error = null; SB.members = null; ANA_CACHE = {}; logF.user = null; sbSave();
 }
 async function sbAll(table, query){
   const out = [];
@@ -1626,7 +1767,7 @@ async function syncRecords(){
     const incoming = recordJSON(merged) !== before;
     await dbPush(merged, R, uid);
     SYNC_STATE.last = Date.now(); SYNC_STATE.error = null; setSyncStatus('idle');
-    if(incoming && ['home','analysis','wrong','upload','setup'].includes(current)) VIEWS[current]();
+    if(incoming && ['home','analysis','wrong','upload','setup','log'].includes(current)) VIEWS[current]();
   }catch(e){ console.warn(e); SYNC_STATE.error = e.message; setSyncStatus(SB.session ? 'error' : 'off'); }
   finally{ SYNC_STATE.busy = false; if(SYNC_STATE.again){ SYNC_STATE.again = false; setTimeout(syncRecords, 500); } }
 }
