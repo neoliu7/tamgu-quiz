@@ -128,7 +128,12 @@ details summary{cursor:pointer;color:var(--primary)}
 .logq .qimg{max-width:420px}
 .logtbl td:nth-child(1),.logtbl td:nth-child(4),.logtbl td:nth-child(7),.logtbl td:nth-child(8){white-space:nowrap}
 .logtbl td:nth-child(2){min-width:110px} .logtbl td:nth-child(3){min-width:220px} .logtbl tr.logday td,.logtbl tr.logdetail td{white-space:normal}
-#userbox{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+#userbox{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);flex-wrap:wrap}
+#mebtn{color:inherit;text-decoration:none;display:flex;align-items:center;gap:4px}
+.gradegrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.gradecard{display:flex;flex-direction:column;gap:4px;align-items:flex-start;text-align:left;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:12px;padding:14px;font:inherit;cursor:pointer}
+.gradecard b{font-size:17px} .gradecard:hover{border-color:var(--primary)} .gradecard.on{border-color:var(--primary);background:var(--primary-weak)}
+.utbl select{padding:4px 6px;font-size:13px}
 </style>
 </head>
 <body>
@@ -140,7 +145,8 @@ details summary{cursor:pointer;color:var(--primary)}
     <button data-v="analysis">분석</button>
     <button data-v="wrong">오답노트</button>
     <button data-v="log">풀이기록</button>
-    <button data-v="upload">문제관리</button>
+    <button data-v="upload" data-admin>문제관리</button>
+    <button data-v="users" data-admin>사용자</button>
   </nav>
   <div id="userbox"></div>
 </div></header>
@@ -157,11 +163,12 @@ let LS_KEY = LS_BASE;                       // 로그인 후 'tamgu_quiz_v1:<아
 let DB = {questions:[], attempts:[], wrong:{}, settings:null, sharedHash:null};
 function loadDB(){
   try{ const s = localStorage.getItem(LS_KEY); if(s){ const d = Object.assign({questions:[],attempts:[],wrong:{},settings:null,sharedHash:null,qTomb:{},resetAt:0,settingsMt:0,skips:{}}, JSON.parse(s));
-    d.attempts.forEach(a=>{ if(!a.k) a.k = a.qid+'|'+a.ts; }); return d; } }catch(e){}
+    d.attempts.forEach(a=>{ if(!a.k) a.k = a.qid+'|'+a.ts; if(!a.grade) a.grade = 'h3'; });           // 학년 도입 이전 기록은 고3/재수생
+    d.questions = (d.questions||[]).filter(q=>q.src!=='shared'); return d; } }catch(e){}
   return {questions:[], attempts:[], wrong:{}, settings:null};
 }
 function saveDB(){
-  try{ localStorage.setItem(LS_KEY, JSON.stringify(DB)); }
+  try{ localStorage.setItem(LS_KEY, JSON.stringify({...DB, questions: DB.questions.filter(q=>q.src!=='shared')})); }
   catch(e){ toast('⚠ 저장 실패: 브라우저 저장공간이 부족하거나 차단되었습니다. 백업을 내보내 주세요.'); }
 }
 const IMG = {
@@ -212,12 +219,12 @@ async function hydrateImages(el){
     const blob = await IMG.get(k);
     if(blob){ img.src = URL.createObjectURL(blob); continue; }
     try{
-      const r = await fetch('images/' + encodeURIComponent(k) + '.enc', {cache:'no-cache'}); if(!r.ok) throw new Error();
-      const b = new Uint8Array(await r.arrayBuffer());
-      const plain = await aesDec(AUTH.key, b.subarray(0,12), b.subarray(12));
-      img.src = URL.createObjectURL(new Blob([plain], {type: mimeOf(k)}));
+      if(!SB.session) throw new Error(); await sbEnsure();
+      const r = await fetch(`${SB_URL}/storage/v1/object/authenticated/qimages/${encodeURIComponent(k)}`, {headers:{apikey:SB_KEY, Authorization:'Bearer '+SB.session.access_token}});
+      if(!r.ok) throw new Error();
+      img.src = URL.createObjectURL(await r.blob());
     }catch(e){
-      img.replaceWith(Object.assign(document.createElement('div'),{className:'msg wrn',textContent:`이미지 '${k}'를 찾을 수 없습니다. (관리자 이미지 게시 여부 확인)`}));
+      img.replaceWith(Object.assign(document.createElement('div'),{className:'msg wrn',textContent:`이미지 '${k}'를 찾을 수 없습니다. (관리자 이미지 업로드 여부 확인)`}));
     }
   }
 }
@@ -241,7 +248,8 @@ function judge(o){
   if(o.acc < GOOD) return '<span class="badge b-warn">🟡 보통</span>';
   return '<span class="badge b-ok">🟢 양호</span>';
 }
-function unitAccMap(){ const r = {}; for(const o of aggregate(DB.attempts, a=>a.subject+'|'+a.unit)) r[o.key] = o.acc; return r; }
+const gAtts = () => DB.attempts.filter(a=>(a.grade||'h3')===AUTH.grade);            // 현재 학년 풀이기록
+function unitAccMap(){ const r = {}; for(const o of aggregate(gAtts(), a=>a.subject+'|'+a.unit)) r[o.key] = o.acc; return r; }
 function weakUnits(atts, limit=3){
   return aggregate(atts, a=>a.subject+'|'+a.unit).filter(o=>o.n>=MIN_N && o.acc<WEAK).sort((a,b)=>a.acc-b.acc||b.n-a.n).slice(0,limit);
 }
@@ -257,9 +265,10 @@ const openWrong = () => Object.entries(DB.wrong).filter(([id,w])=>!w.deleted && 
    4. 라우팅
    ========================================================= */
 let current = 'home', session = null, timerId = null, charts = [];
-const VIEWS = {home:viewHome, upload:viewUpload, setup:viewSetup, quiz:viewQuiz, result:viewResult, analysis:viewAnalysis, wrong:viewWrong, log:viewLog};
+const VIEWS = {home:viewHome, upload:viewUpload, setup:viewSetup, quiz:viewQuiz, result:viewResult, analysis:viewAnalysis, wrong:viewWrong, log:viewLog, me:viewMe, users:viewUsers};
 function go(v){
   if(!AUTH) return viewLogin();
+  if(['upload','users'].includes(v) && AUTH.role!=='admin') v = 'home';
   if(current==='quiz' && v!=='quiz' && v!=='result' && session && !session.done){
     if(!confirm('풀이 중인 세션을 종료할까요? 지금까지 제출한 답은 저장됩니다.')) return;
     finishSession(false);
@@ -274,29 +283,28 @@ document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>go(b.dataset.v
    5. 홈
    ========================================================= */
 function viewHome(){
-  const atts = DB.attempts, nQ = DB.questions.length;
-  if(!nQ && SHARED_INFO.loading){ $('#app').innerHTML = `<div class="card empty"><h2>공용 문제은행을 불러오는 중…</h2></div>`; return; }
-  if(!nQ){
-    $('#app').innerHTML = `<div class="card empty">
-      <h2>문제은행이 비어 있습니다</h2>
-      <p>양식에 맞춘 엑셀(xlsx)·CSV 파일을 업로드하거나, 샘플 문제로 바로 체험해 보세요.</p>
-      <div class="row" style="justify-content:center;margin-top:16px">
-        <button class="btn pri" onclick="loadSample(true)">샘플 문제 불러오기</button>
-        <button class="btn" onclick="go('upload')">문제 업로드</button>
-        <button class="btn" onclick="downloadTemplate()">📥 업로드 양식 받기</button>
-      </div></div>`;
-    return;
+  if(!AUTH.grade){
+    $('#app').innerHTML = `<div class="card"><h2>🎓 학년을 선택하세요</h2><p class="muted">선택한 학년의 문제은행으로 문제가 출제됩니다. 나중에 [내 정보]에서 바꿀 수 있습니다.</p>${gradeGridHTML()}</div>`;
+    bindGradeGrid(); return;
   }
+  const atts = gAtts(), nQ = DB.questions.length;
+  if(!nQ){
+    $('#app').innerHTML = BANK.loading ? `<div class="card empty"><h2>${esc(gradeName(AUTH.grade))} 문제은행을 불러오는 중…</h2></div>`
+      : `${legacyCardHTML(true)}<div class="card empty"><h2>🎓 ${esc(gradeName(AUTH.grade))} 문제은행에 등록된 문제가 없습니다</h2>
+        ${BANK.error?`<div class="msg err">${esc(BANK.error)}</div>`:''}
+        <p class="muted">${AUTH.role==='admin' ? '[문제관리]에서 이 학년의 과목별 문제를 등록하세요.' : '관리자가 문제를 등록하면 이곳에 표시됩니다. 학년이 맞는지 [내 정보]에서 확인하세요.'}</p>
+        <div class="row" style="justify-content:center;margin-top:16px">
+          ${AUTH.role==='admin' ? `<button class="btn pri" onclick="go('upload')">문제관리로 이동</button>` : ''}
+          <button class="btn" onclick="go('me')">학년 변경</button></div></div>`;
+    bindLegacy(); return;
+  }
+  const subs = [...new Set(DB.questions.map(q=>q.subject))];
   const acc = atts.length ? atts.reduce((s,a)=>s+a.score,0)/atts.length : null;
   const weak = weakUnits(atts);
   const wn = openWrong().length;
-  const nLocalQ = DB.questions.filter(q=>q.src!=='shared').length;
-  const pubBanner = AUTH.role==='admin' && nLocalQ ? `<div class="card" style="border-color:var(--warn);background:var(--warn-weak)"><div class="row">
-      <span>⚠ <b>이 기기에만 있는 문제 ${nLocalQ}개</b>가 있습니다. 다른 기기·사용자에게는 보이지 않습니다.</span><span class="sp"></span>
-      <button class="btn sm pri" onclick="go('upload')">${isAdmin()?'공용으로 게시하기':'게시 권한 연결하기'}</button></div></div>` : '';
-  $('#app').innerHTML = `${pubBanner}
+  $('#app').innerHTML = `${legacyCardHTML(true)}
     <div class="kpis">
-      <div class="kpi"><div class="l">문제은행</div><div class="v">${nQ}</div></div>
+      <div class="kpi"><div class="l">🎓 ${esc(gradeName(AUTH.grade))} 문제은행</div><div class="v">${nQ}</div><div class="small muted">${subs.length}과목</div></div>
       <div class="kpi"><div class="l">누적 풀이</div><div class="v">${atts.length}</div></div>
       <div class="kpi"><div class="l">전체 정답률</div><div class="v">${pct(acc)}</div></div>
       <div class="kpi"><div class="l">연속 학습</div><div class="v">${streakDays()}일</div></div>
@@ -313,10 +321,11 @@ function viewHome(){
       <button class="btn" onclick="startWrongSession()" ${wn?'':'disabled'}>↻ 오답만 다시 풀기 (${wn})</button>
       <button class="btn" onclick="go('analysis')">📊 분석 리포트</button>
     </div>`;
+  bindLegacy();
 }
 
 /* =========================================================
-   6. 업로드 / 문제관리
+   6. 문제관리(관리자: 학년별·과목별 문제은행) · 내 정보 · 사용자 관리
    ========================================================= */
 const COLMAP = {'문항id':'id','id':'id','과목':'subject','대단원':'unit','단원':'unit','소단원':'subunit','유형':'type','난이도':'difficulty','문제':'text','이미지':'image',
   '보기1':'c1','보기2':'c2','보기3':'c3','보기4':'c4','보기5':'c5','선택지1':'c1','선택지2':'c2','선택지3':'c3','선택지4':'c4','선택지5':'c5','정답':'answer','해설':'explanation','배점':'points','채점기준':'criteria'};
@@ -326,89 +335,198 @@ function normType(t){ t = String(t||'').replace(/\s/g,'');
   if(/서술|논술/.test(t)) return '서술형';
   return null; }
 let pending = null;
+const GRADES = [['m1','중1'],['m2','중2'],['m3','중3'],['h1','고1'],['h2','고2'],['h3','고3/재수생']];
+const gradeName = c => (GRADES.find(g=>g[0]===c)||[null,'학년 미선택'])[1];
+const BM = {grade:null, loadedGrade:null, banks:[], questions:[], loading:false, error:null};   // 관리자 문제관리 화면 상태
+const fmtDT = v => v ? new Date(v).toLocaleString('ko-KR',{dateStyle:'short',timeStyle:'short'}) : '-';
 
+async function loadBM(){
+  BM.loading = true; BM.error = null;
+  try{ const r = await loadGradeQuestions(BM.grade, {cache: BM.grade===AUTH.grade}); BM.banks = r.banks; BM.questions = r.questions; }
+  catch(e){ BM.error = e.message; BM.banks = []; BM.questions = []; }
+  BM.loading = false; BM.loadedGrade = BM.grade;
+}
 function viewUpload(){
-  const bySub = {};
-  for(const q of DB.questions){ const s = bySub[q.subject] ||= {n:0,shared:0,'객관식':0,'단답형':0,'서술형':0}; s.n++; s[q.type]++; if(q.src==='shared') s.shared++; }
-  const nShared = DB.questions.filter(q=>q.src==='shared').length, nLocal = DB.questions.length - nShared;
-  $('#app').innerHTML = `
-  <h2>문제관리</h2>
-  <div class="card">
-    <div class="row"><h3 style="margin:0">문제 업로드</h3><span class="sp"></span>
+  if(!BM.grade) BM.grade = AUTH.grade || 'h3';
+  if(BM.loadedGrade !== BM.grade){
+    $('#app').innerHTML = `<h2>문제관리</h2><div class="card empty"><p>${esc(gradeName(BM.grade))} 문제은행을 불러오는 중…</p></div>`;
+    if(!BM.loading) loadBM().then(()=>{ if(current==='upload') viewUpload(); });
+    return;
+  }
+  const by = {}; for(const q of BM.questions){ const o = by[q.subject] ||= {'객관식':0,'단답형':0,'서술형':0}; o[q.type]++; }
+  $('#app').innerHTML = `<div class="row" style="margin-bottom:14px"><h2 style="margin:0">문제관리</h2><span class="sp"></span>
       <button class="btn sm" onclick="downloadTemplate()">📥 업로드 양식(xlsx)</button></div>
-    <div class="drop" id="drop" style="margin-top:12px">📄 파일을 끌어다 놓거나 클릭하세요 (xlsx · xls · csv)<input type="file" id="file" accept=".xlsx,.xls,.csv" hidden></div>
-    <div id="pv"></div>
-  </div>
-  ${AUTH.role==='admin' ? adminCardHTML() : ''}
-  <div class="card">
-    <h3>문제은행 현황 <span class="muted small">(공용 ${nShared} · 개인 ${nLocal}문항)</span></h3>
-    ${SHARED_INFO.available?`<div class="msg ${SHARED_INFO.error?'err':'wrn'}" style="margin-bottom:10px">🌐 공용 문제은행(🔒 암호화 저장)은 로그인한 모든 사용자에게 자동 동기화됩니다. ${isAdmin()?'관리자 모드에서는 업로드·삭제가 모든 사용자에게 반영됩니다.':'공용 문제는 관리자만 수정할 수 있습니다.'}${SHARED_INFO.error?' · 최근 동기화 실패: '+esc(SHARED_INFO.error):''}</div>`:''}
-    ${DB.questions.length ? `<div class="tbl"><table><tr><th>과목</th><th class="num">문항수</th><th class="num">공용</th><th class="num">객관식</th><th class="num">단답형</th><th class="num">서술형</th><th></th></tr>
-      ${Object.entries(bySub).map(([s,o])=>`<tr><td>${esc(s)}</td><td class="num">${o.n}</td><td class="num">${o.shared}</td><td class="num">${o['객관식']}</td><td class="num">${o['단답형']}</td><td class="num">${o['서술형']}</td>
-      <td class="num">${o.n>o.shared?`<button class="btn sm danger" data-del="${esc(s)}">개인문제 삭제</button>`:''}${isAdmin()&&o.shared?` <button class="btn sm danger" data-delshared="${esc(s)}">공용에서 삭제</button>`:''}</td></tr>`).join('')}</table></div>` : '<p class="muted">등록된 문제가 없습니다.</p>'}
-    <div class="row" style="margin-top:12px">
-      ${isAdmin() && nLocal ? `<button class="btn sm pri" id="publocal">📤 이 기기의 개인 문제 ${nLocal}개를 공용으로 게시</button>` : ''}
-      ${SHARED_INFO.available?'<button class="btn sm" onclick="syncSharedBank(true)">🌐 공용 문제은행 다시 불러오기</button>':''}
-      <button class="btn sm" onclick="loadSample(false)">샘플 문제 추가</button>
-      <button class="btn sm" onclick="exportBank()" ${DB.questions.length?'':'disabled'}>문제은행 xlsx로 내보내기</button>
-      <button class="btn sm danger" onclick="if(confirm('직접 올린 개인 문제를 모두 삭제할까요? (공용 문제·학습기록은 유지)')){removeLocalQ(()=>true);viewUpload();}" ${nLocal?'':'disabled'}>개인 문제 전체 삭제</button>
+    ${legacyCardHTML(false)}
+    <div class="card"><div class="row" style="margin-bottom:12px"><b>학년</b><div class="chips">${GRADES.map(([c,n])=>`<label class="chip ${BM.grade===c?'on':''}"><input type="radio" name="bmg" value="${c}" ${BM.grade===c?'checked':''}>${n}</label>`).join('')}</div></div>
+      <h3>🗂 ${esc(gradeName(BM.grade))} 문제은행 <span class="muted small">(과목 ${BM.banks.length}개 · ${BM.questions.length}문항)</span></h3>
+      ${BM.error?`<div class="msg err">${esc(BM.error)}</div>`:''}
+      ${BM.banks.length ? `<div class="tbl"><table><tr><th>과목</th><th class="num">문항수</th><th class="num">객관식</th><th class="num">단답형</th><th class="num">서술형</th><th>최종 수정</th><th></th></tr>
+        ${BM.banks.map(b=>{ const o = by[b.subject]||{}; return `<tr><td><b>${esc(b.subject)}</b></td><td class="num">${b.question_count}</td><td class="num">${o['객관식']||0}</td><td class="num">${o['단답형']||0}</td><td class="num">${o['서술형']||0}</td>
+          <td class="small">${fmtDT(b.updated_at)}</td>
+          <td class="num" style="white-space:nowrap"><button class="btn sm" data-bexp="${b.id}">내보내기</button> <button class="btn sm danger" data-bdel="${b.id}">삭제</button></td></tr>`; }).join('')}</table></div>`
+        : '<p class="muted">이 학년에 등록된 과목 문제은행이 없습니다. 아래에서 문제 파일을 올리면 과목별로 자동 생성됩니다.</p>'}
     </div>
-  </div>
-  <div class="card">
-    <h3>문제 이미지</h3>
-    <p class="small muted" style="margin-top:0">양식의 '이미지' 열에 파일명(예: phy_001.png)을 적었다면 같은 이름의 이미지 파일을 여기에 올려 주세요. URL(https://…)을 적었다면 업로드할 필요가 없습니다.</p>
-    <div class="row"><label class="btn sm">🖼 이미지 파일 선택<input type="file" id="imgs" accept="image/*" multiple hidden></label><span class="muted small" id="imgcount"></span>
-      ${isAdmin()?'<label class="small"><input type="checkbox" id="imgshared" checked> 🌐 공용(images 폴더)으로 게시</label>':''}</div>
-  </div>
-  <div class="card">
-    <h3>백업 · 초기화</h3>
-    <p class="small muted" style="margin-top:0">데이터는 이 브라우저에만 저장됩니다. 브라우저 데이터를 지우면 사라지니 주기적으로 백업해 두세요. (이미지는 백업에 포함되지 않습니다)</p>
-    <div class="row">
-      <button class="btn sm" onclick="exportBackup()">💾 백업 내보내기(JSON)</button>
-      <label class="btn sm">📂 백업 가져오기<input type="file" id="bk" accept=".json" hidden></label>
-      <button class="btn sm danger" onclick="if(confirm('학습기록과 오답노트를 모두 삭제할까요? 문제은행은 유지됩니다.')){DB.attempts=[];DB.wrong={};DB.resetAt=Date.now();saveDB();syncRecords();toast('학습기록을 초기화했습니다');}">학습기록 초기화</button>
-    </div>
-  </div>
-  <details class="card"><summary>업로드 양식 작성 안내</summary>${templateGuideHTML()}</details>`;
-
+    <div class="card"><h3>📤 문제 등록 → <span style="color:var(--primary)">${esc(gradeName(BM.grade))}</span></h3>
+      <p class="small muted" style="margin-top:0">파일의 '과목' 열 기준으로 과목별 문제은행에 저장됩니다. 문항ID는 전체 학년에서 고유해야 합니다 (예: ${esc(BM.grade.toUpperCase())}-EAR-001).</p>
+      <div class="drop" id="drop">📄 파일을 끌어다 놓거나 클릭하세요 (xlsx · xls · csv)<input type="file" id="file" accept=".xlsx,.xls,.csv" hidden></div>
+      <div id="pv"></div></div>
+    <div class="card"><h3>🖼 문제 이미지</h3>
+      <p class="small muted" style="margin-top:0">양식의 '이미지' 열에 적은 파일명과 같은 이름으로 올리면 로그인한 사용자에게 표시됩니다. (URL을 적었다면 업로드할 필요가 없습니다)</p>
+      <label class="btn sm">이미지 파일 선택<input type="file" id="imgs" accept="image/*" multiple hidden></label></div>
+    <details class="card"><summary>업로드 양식 작성 안내</summary>${templateGuideHTML()}</details>`;
+  document.querySelectorAll('input[name=bmg]').forEach(r=>r.onchange=()=>{ BM.grade = r.value; pending = null; viewUpload(); });
   const drop = $('#drop'), file = $('#file');
   drop.onclick = ()=> file.click();
   drop.ondragover = e=>{ e.preventDefault(); drop.classList.add('over'); };
   drop.ondragleave = ()=> drop.classList.remove('over');
   drop.ondrop = e=>{ e.preventDefault(); drop.classList.remove('over'); if(e.dataTransfer.files[0]) readQuestionFile(e.dataTransfer.files[0]); };
   file.onchange = ()=>{ if(file.files[0]) readQuestionFile(file.files[0]); file.value=''; };
-  document.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{ const s=b.dataset.del; if(confirm(`'${s}' 과목의 개인 문제를 삭제할까요? (공용 문제는 유지)`)){ removeLocalQ(q=>q.subject===s); viewUpload(); } });
   $('#imgs').onchange = async e=>{
-    const files = [...e.target.files], pub = isAdmin() && $('#imgshared')?.checked; let n=0, pn=0, fail=[];
-    if(pub) toast('이미지를 공용으로 게시하는 중…', 60000);
-    for(const f of files){
-      try{ await IMG.put(f.name, f); n++; }catch(err){}
-      if(pub){ try{ await publishImage(f); pn++; }catch(err){ fail.push(f.name+': '+err.message); } }
-    }
-    toast(pub ? `이미지 ${pn}개를 공용으로 게시했습니다${fail.length?` (실패 ${fail.length}: ${fail[0]})`:''}` : `이미지 ${n}개를 저장했습니다`, 5000); refreshImgCount(); e.target.value='';
+    const files = [...e.target.files]; let n = 0; const fail = [];
+    toast('이미지를 올리는 중…', 60000);
+    for(const f of files){ try{ await sbUploadImage(f); n++; }catch(err){ fail.push(f.name+': '+err.message); } }
+    toast(`이미지 ${n}개를 올렸습니다${fail.length?` (실패 ${fail.length}: ${fail[0]})`:''}`, 6000); e.target.value = '';
   };
-  document.querySelectorAll('[data-delshared]').forEach(b=>b.onclick=async()=>{
-    const s = b.dataset.delshared;
-    if(!confirm(`공용 문제은행에서 '${s}' 과목 문제를 모두 삭제합니다. 모든 사용자에게 반영됩니다. 계속할까요?`)) return;
-    b.disabled = true; b.textContent = '삭제 중…';
-    try{ const n = await publishShared(cur=>cur.filter(q=>q.subject!==s), `과목 삭제: ${s}`); toast(`삭제 완료 (공용 ${n}문항 남음). 다른 사용자에게는 1~2분 후 반영됩니다`, 5000); viewUpload(); }
-    catch(err){ toast('삭제 실패: '+err.message, 6000); b.disabled=false; b.textContent='공용에서 삭제'; }
+  document.querySelectorAll('[data-bexp]').forEach(b=>b.onclick=()=>{ const bk = BM.banks.find(x=>String(x.id)===b.dataset.bexp); exportBankXlsx(bk, BM.questions.filter(q=>q.bankId===bk.id)); });
+  document.querySelectorAll('[data-bdel]').forEach(b=>b.onclick=async()=>{
+    const bk = BM.banks.find(x=>String(x.id)===b.dataset.bdel);
+    if(!confirm(`${gradeName(bk.grade)} · ${bk.subject} 문제은행(${bk.question_count}문항)을 삭제합니다.\n이 학년 사용자에게서 해당 과목 문제가 사라집니다. (풀이기록은 보존)\n계속할까요?`)) return;
+    b.disabled = true;
+    try{ await sbFetch(`/rest/v1/question_banks?id=eq.${bk.id}`, {method:'DELETE', headers:{Prefer:'return=minimal'}});
+         toast(`'${bk.subject}' 문제은행을 삭제했습니다`); await afterBankChange(); }
+    catch(e){ toast('삭제 실패: '+e.message, 6000); b.disabled = false; }
   });
-  bindAdminCard();
-  const pl = $('#publocal');
-  if(pl) pl.onclick = async ()=>{
-    const local = DB.questions.filter(q=>q.src!=='shared');
-    if(!confirm(`이 기기에만 저장된 문제 ${local.length}개를 공용 문제은행에 게시합니다. 모든 기기·사용자에게 보이게 됩니다. 계속할까요?`)) return;
-    pl.disabled = true; pl.textContent = '게시 중…';
-    try{ const n = await publishShared(cur=>{ const m = new Map(cur.map(q=>[q.id,q])); local.forEach(q=>m.set(q.id,q)); return [...m.values()]; }, `개인 문제 공용 게시 (${local.length}문항)`);
-         toast(`공용으로 게시했습니다 (총 ${n}문항). 다른 기기에서는 1~2분 후 새로고침하면 보입니다`, 7000); viewUpload(); }
-    catch(e){ toast('게시 실패: '+e.message, 8000); pl.disabled = false; pl.textContent = '📤 개인 문제 공용 게시'; }
-  };
-  $('#bk').onchange = e=>{ const f=e.target.files[0]; if(f) importBackup(f); };
-  refreshImgCount();
+  bindLegacy();
   if(pending) renderPending();
 }
-async function refreshImgCount(){ const k = await IMG.keys(); const el = $('#imgcount'); if(el) el.textContent = `저장된 이미지 ${k.length}개`; }
+async function afterBankChange(){
+  BM.loadedGrade = null; await loadBM();
+  if(BM.grade===AUTH.grade){ BANK.sig = null; await syncBank(true); }
+  if(current==='upload') viewUpload();
+}
+function exportBankXlsx(bank, qs){
+  if(!window.XLSX) return toast('엑셀 라이브러리를 불러오지 못했습니다');
+  const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet([HEADERS, ...qs.map(qToRow)]);
+  ws['!cols'] = HEADERS.map(h=>({wch: h==='문제'?60: h==='해설'?40: h.startsWith('보기')?14:12}));
+  XLSX.utils.book_append_sheet(wb, ws, '문제'); XLSX.writeFile(wb, `${bank.grade}_${bank.subject}_${dayKey(Date.now())}.xlsx`);
+}
+
+/* 학년 선택 카드 (홈 첫 화면 · 내 정보 공용) */
+function gradeGridHTML(){ return `<div class="gradegrid">${GRADES.map(([c,n])=>`<button class="gradecard ${AUTH.grade===c?'on':''}" data-g="${c}"><b>${n}</b><span class="small muted" data-gs="${c}">…</span></button>`).join('')}</div>`; }
+function bindGradeGrid(){
+  document.querySelectorAll('.gradecard').forEach(b=>b.onclick=()=>setGrade(b.dataset.g));
+  fetchBanks().then(all=>{ for(const [c] of GRADES){ const bs = all.filter(b=>b.grade===c), n = bs.reduce((x,b)=>x+b.question_count,0), el = document.querySelector(`[data-gs="${c}"]`);
+    if(el) el.textContent = bs.length ? `${bs.length}과목 · ${n}문항` : '문제 준비 중'; } }).catch(()=>{});
+}
+async function setGrade(c){
+  if(c===AUTH.grade){ if(current!=='home') go('home'); return; }
+  try{ await sbFetch('/rest/v1/rpc/set_my_grade', {method:'POST', body:{p_grade:c}}); }
+  catch(e){ return toast('학년 변경 실패: '+e.message, 6000); }
+  AUTH.grade = c; persistAuth(); cfg = null; DB.settings = null;
+  DB.questions = DB.questions.filter(q=>q.src!=='shared'); BANK.sig = null; anaF.grade = logF.grade = c;
+  renderUserbox(); toast(`🎓 ${gradeName(c)} 문제은행으로 변경했습니다`);
+  go('home'); await syncBank(true);
+}
+
+/* 내 정보: 학년 · 비밀번호 · 백업 */
+function viewMe(){
+  $('#app').innerHTML = `<h2>내 정보 <span class="muted small">(${esc(AUTH.id)}${AUTH.role==='admin'?' · 관리자':''})</span></h2>
+    <div class="card"><h3>🎓 학년 선택</h3><p class="small muted" style="margin-top:0">선택한 학년의 문제은행으로 문제가 출제됩니다. 학년을 바꿔도 풀이기록은 학년별로 그대로 남습니다.</p>${gradeGridHTML()}</div>
+    <div class="card"><h3>🔑 비밀번호 변경</h3><div class="row">
+      <input type="password" id="pw0" placeholder="현재 비밀번호" autocomplete="current-password" style="width:170px">
+      <input type="password" id="pw1" placeholder="새 비밀번호 (8자 이상)" autocomplete="new-password" style="width:190px">
+      <input type="password" id="pw2" placeholder="새 비밀번호 확인" autocomplete="new-password" style="width:170px">
+      <button class="btn sm pri" id="pwgo">변경</button></div></div>
+    <div class="card"><h3>💾 백업 · 초기화</h3>
+      <p class="small muted" style="margin-top:0">풀이기록은 DB에 저장되어 어느 기기에서든 이어집니다. 필요하면 파일로도 보관할 수 있습니다.</p>
+      <div class="row">
+        <button class="btn sm" onclick="exportBackup()">💾 백업 내보내기(JSON)</button>
+        <label class="btn sm">📂 백업 가져오기<input type="file" id="bk" accept=".json" hidden></label>
+        <button class="btn sm danger" id="resetrec">학습기록 초기화</button></div></div>`;
+  bindGradeGrid();
+  $('#bk').onchange = e=>{ const f = e.target.files[0]; if(f) importBackup(f); };
+  $('#resetrec').onclick = ()=>{ if(confirm('내 학습기록과 오답노트를 모두 삭제할까요? (모든 학년 · 모든 기기) 문제은행은 유지됩니다.')){ DB.attempts=[]; DB.wrong={}; DB.resetAt=Date.now(); saveDB(); syncRecords(); toast('학습기록을 초기화했습니다'); } };
+  $('#pwgo').onclick = async ()=>{
+    const p0 = $('#pw0').value, p1 = $('#pw1').value, p2 = $('#pw2').value;
+    if(p1.length < 8) return toast('새 비밀번호는 8자 이상으로 입력하세요');
+    if(p1 !== p2) return toast('새 비밀번호 확인이 일치하지 않습니다');
+    const btn = $('#pwgo'); btn.disabled = true;
+    try{
+      await sbFetch('/auth/v1/token?grant_type=password', {method:'POST', auth:false, body:{email:SB_EMAIL(AUTH.id), password:p0}});   // 현재 비밀번호 확인
+      await sbFetch('/auth/v1/user', {method:'PUT', body:{password:p1}});
+      ['#pw0','#pw1','#pw2'].forEach(x=>$(x).value=''); toast('비밀번호를 변경했습니다', 5000);
+    }catch(e){ toast(e.status===400 ? '현재 비밀번호가 올바르지 않습니다' : '변경 실패: '+e.message, 6000); }
+    btn.disabled = false;
+  };
+}
+
+/* 사용자 관리 (관리자) */
+function viewUsers(){
+  $('#app').innerHTML = `<h2>사용자 관리</h2><div class="card" id="ulist"><p class="muted">불러오는 중…</p></div>
+    <div class="card"><h3>➕ 사용자 추가</h3><div class="row">
+      <input type="text" id="nu_id" placeholder="아이디 (영문 소문자·숫자)" style="width:180px" autocomplete="off" autocapitalize="off">
+      <input type="password" id="nu_pw" placeholder="초기 비밀번호 (8자 이상)" style="width:180px" autocomplete="new-password">
+      <select id="nu_grade">${GRADES.map(([c,n])=>`<option value="${c}">${n}</option>`).join('')}</select>
+      <select id="nu_role"><option value="user">일반 사용자</option><option value="admin">관리자</option></select>
+      <button class="btn sm pri" id="nu_add">추가</button></div>
+      <div class="hint">사용자는 받은 아이디·비밀번호로 바로 로그인할 수 있고, [내 정보]에서 비밀번호와 학년을 바꿀 수 있습니다.</div></div>`;
+  $('#nu_add').onclick = addUser;
+  renderUsers();
+}
+async function renderUsers(){
+  const el = $('#ulist'); if(!el) return;
+  if(!SB.session){ el.innerHTML = `<div class="msg err">DB에 연결되지 않았습니다: ${esc(SB.error||'다시 로그인하세요')}</div>`; return; }
+  try{
+    const [mem, sum] = await Promise.all([loadMembers(), sbFetch('/rest/v1/v_user_summary?select=*')]);
+    const sm = new Map(sum.map(r=>[r.login_id, r]));
+    el.innerHTML = `<h3>👥 사용자 ${mem.length}명</h3><div class="tbl"><table class="utbl"><tr><th>아이디</th><th>권한</th><th>학년</th><th>상태</th><th class="num">풀이</th><th class="num">정답률</th><th>최근 학습</th><th></th></tr>
+      ${mem.map(m=>{ const r = sm.get(m.login_id)||{}, me = m.login_id===AUTH.id; return `<tr><td><b>${esc(m.login_id)}</b>${me?' <span class="badge b-mute">나</span>':''}</td>
+        <td><select data-role="${esc(m.login_id)}" ${me?'disabled':''}><option value="user" ${m.role==='user'?'selected':''}>일반</option><option value="admin" ${m.role==='admin'?'selected':''}>관리자</option></select></td>
+        <td><select data-grade="${esc(m.login_id)}" ${me?'disabled title="내 정보에서 변경"':''}>${m.grade?'':'<option value="">미선택</option>'}${GRADES.map(([c,n])=>`<option value="${c}" ${m.grade===c?'selected':''}>${n}</option>`).join('')}</select></td>
+        <td>${!m.active?'<span class="badge b-mute">비활성</span>':m.user_id?'<span class="badge b-ok">사용 중</span>':'<span class="badge b-warn">계정 연결 대기</span>'}</td>
+        <td class="num">${r.attempts||0}</td><td class="num">${r.attempts?pct(Number(r.accuracy)):'-'}</td><td class="small">${fmtDT(r.last_activity)}</td>
+        <td class="num" style="white-space:nowrap"><button class="btn sm" data-ana="${esc(m.login_id)}">분석</button> <button class="btn sm" data-log="${esc(m.login_id)}">풀이기록</button>
+          <button class="btn sm" data-pw="${esc(m.login_id)}">비밀번호</button>
+          ${me?'':m.active?`<button class="btn sm danger" data-off="${esc(m.login_id)}">비활성</button>`:`<button class="btn sm" data-on="${esc(m.login_id)}">활성</button>`}</td></tr>`; }).join('')}</table></div>`;
+    const memOf = id => mem.find(m=>m.login_id===id);
+    const upsert = async (id, role, grade, msg)=>{ try{ await sbFetch('/rest/v1/rpc/admin_upsert_member', {method:'POST', body:{p_login:id, p_role:role, p_grade:grade||null}}); toast(msg); }catch(e){ toast('변경 실패: '+e.message, 6000); } SB.members = null; renderUsers(); };
+    el.querySelectorAll('[data-role]').forEach(x=>x.onchange=()=>{ const m = memOf(x.dataset.role); upsert(m.login_id, x.value, m.grade, `'${m.login_id}' 권한을 ${x.value==='admin'?'관리자':'일반'}(으)로 변경했습니다`); });
+    el.querySelectorAll('[data-grade]').forEach(x=>x.onchange=()=>{ const m = memOf(x.dataset.grade); if(x.value) upsert(m.login_id, m.role, x.value, `'${m.login_id}' 학년을 ${gradeName(x.value)}(으)로 변경했습니다`); });
+    el.querySelectorAll('[data-ana]').forEach(x=>x.onclick=()=>{ anaF.user = x.dataset.ana; anaF.grade = ''; delete ANA_CACHE[anaF.user]; go('analysis'); });
+    el.querySelectorAll('[data-log]').forEach(x=>x.onclick=()=>{ logF.user = x.dataset.log; logF.grade = ''; delete ANA_CACHE[logF.user]; go('log'); });
+    el.querySelectorAll('[data-off]').forEach(x=>x.onclick=async()=>{ if(!confirm(`'${x.dataset.off}' 사용자를 비활성화할까요? 로그인과 기록 저장이 차단됩니다. (기록은 보존)`)) return;
+      try{ await sbFetch('/rest/v1/rpc/admin_deactivate_member', {method:'POST', body:{p_login:x.dataset.off}}); toast('비활성화했습니다'); }catch(e){ toast('실패: '+e.message, 6000); } SB.members = null; renderUsers(); });
+    el.querySelectorAll('[data-on]').forEach(x=>x.onclick=()=>{ const m = memOf(x.dataset.on); upsert(m.login_id, m.role, m.grade, `'${m.login_id}' 사용자를 다시 활성화했습니다`); });
+    el.querySelectorAll('[data-pw]').forEach(x=>x.onclick=async()=>{
+      const id = x.dataset.pw, pw = prompt(`'${id}'의 새 비밀번호 (8자 이상)`); if(pw==null) return;
+      if(pw.length < 8) return toast('비밀번호는 8자 이상으로 입력하세요');
+      try{ if(id===AUTH.id) await sbFetch('/auth/v1/user', {method:'PUT', body:{password:pw}});
+           else await sbFetch('/rest/v1/rpc/admin_set_password', {method:'POST', body:{p_login:id, p_password:pw}});
+           toast(`'${id}' 비밀번호를 재설정했습니다`, 5000); }
+      catch(e){ toast(/no account/i.test(e.message) ? '아직 계정이 연결되지 않은 사용자입니다. 사용자 추가를 다시 실행하세요' : '실패: '+e.message, 7000); }
+    });
+  }catch(e){ el.innerHTML = `<div class="msg err">사용자 목록을 불러오지 못했습니다: ${esc(e.message)}</div>`; }
+}
+async function addUser(){
+  const id = $('#nu_id').value.trim().toLowerCase(), pw = $('#nu_pw').value, grade = $('#nu_grade').value, role = $('#nu_role').value;
+  if(!/^[a-z0-9._-]{3,30}$/.test(id)) return toast('아이디는 영문 소문자·숫자 3~30자로 입력하세요');
+  if(pw.length < 8) return toast('비밀번호는 8자 이상으로 입력하세요');
+  const btn = $('#nu_add'); btn.disabled = true; btn.textContent = '처리 중…';
+  try{
+    await sbFetch('/rest/v1/rpc/admin_upsert_member', {method:'POST', body:{p_login:id, p_role:role, p_grade:grade}});
+    let created = null;
+    try{ created = await sbFetch('/auth/v1/signup', {method:'POST', auth:false, body:{email:SB_EMAIL(id), password:pw}}); }   // 새 사용자의 인증 계정 (관리자 세션에는 영향 없음)
+    catch(e){
+      if(!(e.code==='user_already_exists' || /already/i.test(e.message))) throw e;
+      await sbFetch('/rest/v1/rpc/admin_set_password', {method:'POST', body:{p_login:id, p_password:pw}});                   // 이미 연결된 사용자 → 비밀번호 재설정
+    }
+    const uid = created && (created.user?.id || created.id);
+    if(uid) await sbFetch('/rest/v1/rpc/admin_link_member', {method:'POST', body:{p_login:id, p_user:uid}});
+    toast(`'${id}' 사용자를 추가했습니다 (${gradeName(grade)}${role==='admin'?' · 관리자':''})`, 6000);
+    $('#nu_id').value = ''; $('#nu_pw').value = ''; SB.members = null; renderUsers();
+  }catch(e){ toast('추가 실패: '+(/no account/i.test(e.message) ? '같은 아이디의 인증 계정이 이미 있어 연결할 수 없습니다 (Supabase Authentication에서 확인)' : e.message), 9000); }
+  btn.disabled = false; btn.textContent = '추가';
+}
 
 async function readQuestionFile(f){
   if(!window.XLSX){ toast('엑셀 처리 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인하세요.'); return; }
@@ -431,8 +549,7 @@ async function readQuestionFile(f){
 
 async function validateRows(rows, fname){
   const valid = [], errors = [], warnings = [], seen = new Set();
-  const existing = new Set(DB.questions.map(q=>q.id));
-  const imgKeys = new Set(await IMG.keys());
+  const existing = new Set(BM.questions.map(q=>q.id));
   let overwrite = 0;
   rows.forEach((r, i)=>{
     const line = i+2, o = {};
@@ -459,10 +576,9 @@ async function validateRows(rows, fname){
       if(q.choices.length !== 5) wrn(`보기가 ${q.choices.length}개입니다`);
     }
     if(type==='서술형' && !q.criteria) wrn('서술형 채점기준(키워드)이 없어 자동 예비채점이 생략됩니다');
-    if(!q.id){ q.id = `${q.subject}-R${line}`; wrn(`문항ID가 없어 '${q.id}'로 자동 생성`); }
+    if(!q.id){ q.id = `${(BM.grade||'x').toUpperCase()}-${q.subject}-R${line}`; wrn(`문항ID가 없어 '${q.id}'로 자동 생성`); }
     if(seen.has(q.id)) wrn(`문항ID '${q.id}' 중복 → 아래쪽 행으로 덮어씀`);
     if(existing.has(q.id)) overwrite++;
-    if(q.image && !/^(https?:|data:)/i.test(q.image) && !imgKeys.has(q.image)) wrn(`이미지 '${q.image}' 파일이 아직 업로드되지 않았습니다`);
     seen.add(q.id);
     const idx = valid.findIndex(v=>v.id===q.id); if(idx>=0) valid[idx]=q; else valid.push(q);
   });
@@ -473,48 +589,44 @@ function renderPending(){
   const p = pending, el = $('#pv'); if(!el) return;
   if(!p){ el.innerHTML=''; return; }
   const list = (arr, cls) => arr.slice(0,30).map(m=>`<div class="msg ${cls}">${esc(m)}</div>`).join('') + (arr.length>30?`<div class="small muted">… 외 ${arr.length-30}건</div>`:'');
+  const subs = [...new Set(p.valid.map(q=>q.subject))];
+  const target = subs.map(sub=>{ const b = BM.banks.find(x=>x.subject===sub); return `<b>${esc(sub)}</b> ${b?`<span class="muted">(기존 ${b.question_count}문항)</span>`:'<span class="badge b-pri">신규 과목</span>'}`; }).join(' · ');
   el.innerHTML = `<div style="margin-top:16px">
     <div class="row"><b>${esc(p.fname)}</b> 검증 결과:
       <span class="badge b-ok">✅ 정상 ${p.valid.length}</span><span class="badge b-warn">⚠ 경고 ${p.warnings.length}</span><span class="badge b-bad">❌ 오류 ${p.errors.length}</span></div>
     ${p.errors.length?`<div style="margin-top:8px"><div class="small muted">오류 행은 저장되지 않습니다.</div>${list(p.errors,'err')}</div>`:''}
     ${p.warnings.length?`<details style="margin-top:8px"><summary>경고 ${p.warnings.length}건 보기</summary>${list(p.warnings,'wrn')}</details>`:''}
-    ${!isAdmin()?`<div class="msg wrn" style="margin-top:12px">⚠ 이 기기(브라우저)에만 저장됩니다. 다른 기기나 다른 사용자에게는 보이지 않습니다.${AUTH.role==='admin'?' 모든 기기에 보이게 하려면 아래 <b>🔐 관리자 설정</b>에서 게시 권한을 먼저 연결하세요 (최초 1회).':''}</div>`:''}
-    ${isAdmin()?`<div class="row" style="margin-top:12px"><b>저장 위치</b>
-      <label><input type="radio" name="target" value="shared" checked> 🌐 공용 문제은행에 게시 (모든 사용자)</label>
-      <label><input type="radio" name="target" value="local"> 내 브라우저에만 저장</label></div>`:''}
+    ${p.conflicts?`<div style="margin-top:8px"><div class="msg err"><b>문항ID 중복으로 등록할 수 없습니다.</b> 다른 학년 문제은행에 같은 ID가 있습니다. 파일의 ID를 바꿔 다시 올려 주세요.</div>${list(p.conflicts,'err')}</div>`:''}
+    ${subs.length?`<div class="msg" style="background:var(--surface2);margin-top:10px">등록 대상: <b>🎓 ${esc(gradeName(BM.grade))}</b> · ${target}</div>`:''}
     <div class="row" style="margin-top:8px">
-      <label><input type="radio" name="mode" value="add" checked> 추가 (같은 ID는 덮어쓰기${p.overwrite?` · ${p.overwrite}건`:''})</label>
-      <label><input type="radio" name="mode" value="replace"> 전체 교체</label>
+      <label><input type="radio" name="mode" value="add" checked> 추가 (같은 ID는 수정 내용으로 덮어쓰기${p.overwrite?` · ${p.overwrite}건`:''})</label>
+      <label><input type="radio" name="mode" value="replace"> 파일에 있는 과목만 교체</label>
       <span class="sp"></span>
       <button class="btn" onclick="pending=null;renderPending()">취소</button>
-      <button class="btn pri" id="commit" ${p.valid.length?'':'disabled'}>${p.valid.length}문항 ${isAdmin()?'게시/저장':'저장'}</button>
+      <button class="btn pri" id="commit" ${p.valid.length?'':'disabled'}>${p.valid.length}문항 등록</button>
     </div></div>`;
   $('#commit').onclick = async ()=>{
     const mode = document.querySelector('input[name=mode]:checked').value;
-    const target = document.querySelector('input[name=target]:checked')?.value || 'local';
-    if(target==='shared'){
-      if(mode==='replace' && !confirm('공용 문제은행 전체를 이 파일로 교체합니다. 모든 사용자에게 반영됩니다. 계속할까요?')) return;
-      const btn = $('#commit'); btn.disabled = true; btn.textContent = '게시 중…';
-      try{
-        const n = await publishShared(cur=>{
-          if(mode==='replace') return p.valid.slice();
-          const m = new Map(cur.map(q=>[q.id,q])); p.valid.forEach(q=>m.set(q.id,q)); return [...m.values()];
-        }, `문제 업로드: ${p.fname} (${p.valid.length}문항${mode==='replace'?', 전체 교체':''})`);
-        toast(`공용 문제은행에 게시했습니다 (총 ${n}문항). 다른 사용자에게는 1~2분 후 반영됩니다`, 6000);
-        pending = null; viewUpload();
-      }catch(e){ toast('게시 실패: '+e.message, 8000); btn.disabled = false; btn.textContent = `${p.valid.length}문항 게시/저장`; }
-      return;
+    if(mode==='replace'){
+      const lost = subs.map(sub=>{ const b = BM.banks.find(x=>x.subject===sub); return b ? `· ${sub}: 기존 ${b.question_count}문항 → 이 파일의 ${p.valid.filter(q=>q.subject===sub).length}문항` : null; }).filter(Boolean);
+      if(!confirm(`${gradeName(BM.grade)}에서 다음 과목의 기존 문항을 모두 지우고 이 파일 내용으로 바꿉니다.\n${lost.join('\n')||'(기존 문항 없음)'}\n다른 과목은 그대로 유지됩니다. 계속할까요?`)) return;
     }
-    if(mode==='replace'){ if(!confirm('직접 올린 개인 문제를 모두 지우고 교체할까요? (공용 문제는 유지)')) return; removeLocalQ(()=>true); }
-    const map = new Map(DB.questions.map(q=>[q.id,q])); const t = Date.now(); for(const q of p.valid){ delete q.src; q.mt = t; map.set(q.id,q); }
-    DB.questions = [...map.values()]; saveDB(); scheduleRecordSync(); toast(`${p.valid.length}문항을 이 기기에만 저장했습니다`, 4000); pending = null; viewUpload();
+    const btn = $('#commit'); btn.disabled = true; btn.textContent = '등록 중…';
+    try{
+      const r = await publishToBank(BM.grade, p.valid, mode);
+      toast(`${gradeName(BM.grade)} · ${r.subjects.join(', ')}에 ${r.count}문항을 등록했습니다`, 6000);
+      pending = null; await afterBankChange();
+    }catch(e){
+      if(e.list){ p.conflicts = e.list; renderPending(); }
+      toast('등록 실패: '+e.message, 8000); btn.disabled = false; btn.textContent = `${p.valid.length}문항 등록`;
+    }
   };
 }
 
 const HEADERS = ['문항ID','과목','대단원','소단원','유형','난이도','문제','이미지','보기1','보기2','보기3','보기4','보기5','정답','해설','배점','채점기준'];
 function qToRow(q){ return [q.id,q.subject,q.unit,q.subunit,q.type,q.difficulty,q.text,q.image,...[0,1,2,3,4].map(i=>q.choices[i]||''),q.answer,q.explanation,q.points,q.criteria]; }
 function templateGuideHTML(){
-  const g = [['문항ID','○','PHY-001','중복이면 기존 문항을 덮어씁니다. 비우면 자동 생성'],['과목','○','물리학Ⅰ',''],['대단원','○','역학과 에너지','취약영역 분석의 기준 단위'],
+  const g = [['문항ID','○','H3-PHY-001','전체 학년에서 고유해야 함 (학년 접두어 권장). 같은 ID는 덮어쓰기'],['과목','○','물리학Ⅰ',''],['대단원','○','역학과 에너지','취약영역 분석의 기준 단위'],
     ['소단원','','운동량과 충격량','세부 분석용'],['유형','○','객관식 / 단답형 / 서술형',''],['난이도','','상 / 중 / 하','비우면 중'],
     ['문제','○','본문','줄바꿈 가능 · 〈보기〉 줄 아래는 보기 박스로 표시 · 수식은 $...$ (예: $v=\\sqrt{2gh}$)'],['이미지','','phy_001.png 또는 https://…','파일명이면 문제관리에서 이미지 업로드'],
     ['보기1~보기5','객관식 ○','',''],['정답','○','객관식: 3 / 단답형: 운동량|p','단답형 복수정답은 | 로 구분, 서술형은 모범답안'],['해설','','',''],['배점','','2 / 3',''],['채점기준','','작용, 반작용, 반대 방향','서술형 키워드 (쉼표 구분)']];
@@ -534,11 +646,6 @@ function downloadTemplate(){
   XLSX.utils.book_append_sheet(wb, ws2, '작성안내');
   XLSX.writeFile(wb, '탐구문제_업로드양식.xlsx');
 }
-function exportBank(){
-  if(!window.XLSX) return toast('엑셀 라이브러리를 불러오지 못했습니다');
-  const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet([HEADERS, ...DB.questions.map(qToRow)]);
-  XLSX.utils.book_append_sheet(wb, ws, '문제'); XLSX.writeFile(wb, `문제은행_${dayKey(Date.now())}.xlsx`);
-}
 function exportBackup(){
   const blob = new Blob([JSON.stringify({app:'tamgu-quiz',version:1,exportedAt:new Date().toISOString(),...DB})], {type:'application/json'});
   saveBlob(blob, `탐구문제_백업_${dayKey(Date.now())}.json`);
@@ -547,7 +654,7 @@ async function importBackup(f){
   try{ const d = JSON.parse(await f.text());
     if(!Array.isArray(d.questions) || !Array.isArray(d.attempts)) throw new Error('형식이 올바르지 않습니다');
     if(!confirm(`문항 ${d.questions.length}개, 풀이기록 ${d.attempts.length}건으로 현재 데이터를 교체할까요?`)) return;
-    DB = {questions:d.questions, attempts:d.attempts, wrong:d.wrong||{}, settings:d.settings||null}; saveDB(); syncRecords(); toast('백업을 복원했습니다'); viewUpload();
+    DB = {questions:DB.questions.filter(q=>q.src==='shared').concat((d.questions||[]).filter(q=>q.src!=='shared')), attempts:d.attempts, wrong:d.wrong||{}, settings:d.settings||null}; saveDB(); syncRecords(); toast('백업을 복원했습니다'); go('home');
   }catch(e){ toast('백업 파일을 읽지 못했습니다: '+e.message); }
 }
 function loadSample(toHome){
@@ -568,11 +675,11 @@ function unmarkSkipped(id){ if(isSkipped(id)){ DB.skips[id] = {deleted:true, mt:
 function clearSkipped(){ const t = Date.now(); for(const id of Object.keys(DB.skips||{})) if(isSkipped(id)) DB.skips[id] = {deleted:true, mt:t}; saveDB(); scheduleRecordSync(); }
 function viewSetup(){
   const subs = [...new Set(DB.questions.map(q=>q.subject))];
-  if(!subs.length){ $('#app').innerHTML = `<div class="card empty"><h2>등록된 문제가 없습니다</h2><div class="row" style="justify-content:center"><button class="btn pri" onclick="loadSample(false);go('setup')">샘플 문제 불러오기</button><button class="btn" onclick="go('upload')">문제 업로드</button></div></div>`; return; }
+  if(!subs.length){ go('home'); return; }
   cfg = cfg || Object.assign(defaultCfg(subs), DB.settings||{});
   cfg.subjects = cfg.subjects.filter(s=>subs.includes(s)); if(!cfg.subjects.length) cfg.subjects = subs.slice();
   const chip = (group,val,on,label) => `<label class="chip ${on?'on':''}"><input type="checkbox" data-g="${group}" value="${esc(val)}" ${on?'checked':''}>${esc(label??val)}</label>`;
-  $('#app').innerHTML = `<h2>출제 설정</h2><div class="card">
+  $('#app').innerHTML = `<h2>출제 설정 <span class="badge b-ok">🎓 ${esc(gradeName(AUTH.grade))} 문제은행</span></h2><div class="card">
     <div class="field"><label class="t">과목</label><div class="chips">${subs.map(s=>chip('subjects',s,cfg.subjects.includes(s))).join('')}</div></div>
     <div class="field"><label class="t">단원 <button class="btn sm" id="uall">전체 선택</button> <button class="btn sm" id="unone">전체 해제</button></label><div id="units"></div></div>
     <div class="field"><label class="t">유형</label><div class="chips">${TYPES.map(t=>chip('types',t,cfg.types.includes(t))).join('')}</div></div>
@@ -757,7 +864,7 @@ function submit(){
 }
 function record(it, score, answer, time){
   const q = it.q;
-  const a = {qid:q.id, subject:q.subject, unit:q.unit, subunit:q.subunit, type:q.type, difficulty:q.difficulty, points:q.points, score, answer, time:Math.round(time), ts:Date.now(), sid:session.id};
+  const a = {qid:q.id, subject:q.subject, unit:q.unit, subunit:q.subunit, type:q.type, difficulty:q.difficulty, points:q.points, score, answer, time:Math.round(time), ts:Date.now(), sid:session.id, grade:q.grade||AUTH.grade};
   a.k = a.qid+'|'+a.ts; a.mt = a.ts; unmarkSkipped(q.id);
   DB.attempts.push(a); it.att = a;
   const w0 = DB.wrong[q.id], w = w0 && !w0.deleted ? w0 : null;
@@ -833,7 +940,7 @@ function wrongItemHTML(q, att){
 /* =========================================================
    10. 분석 리포트
    ========================================================= */
-let anaF = {days:30, subject:'', group:'unit', user:null};
+let anaF = {days:30, subject:'', group:'unit', user:null, grade:''};
 async function loadUserAttempts(login){
   await loadMembers();                                                   // 최신 회원 상태 (방금 첫 로그인한 사용자 포함)
   const m = (SB.members||[]).find(x=>x.login_id===login);
@@ -844,11 +951,11 @@ async function renderUserSummary(){
   try{
     const rows = await sbFetch('/rest/v1/v_user_summary?select=*&order=login_id.asc');
     el.innerHTML = `<h3>👥 사용자별 학습 현황 <span class="muted small">(전체 기간 · 이름을 누르면 상세 분석)</span></h3><div class="tbl"><table>
-      <tr><th>사용자</th><th class="num">풀이</th><th class="num">정답률</th><th class="num">평균시간</th><th>최근 학습</th></tr>
+      <tr><th>사용자</th><th>학년</th><th class="num">풀이</th><th class="num">정답률</th><th class="num">평균시간</th><th>최근 학습</th></tr>
       ${rows.map(r=>`<tr><td><a href="#" data-pick="${esc(r.login_id)}">${esc(r.login_id)}</a>${r.login_id===anaF.user?' <span class="badge b-pri">보는 중</span>':''}</td>
-        <td class="num">${r.attempts}</td><td class="num">${r.attempts?pct(Number(r.accuracy)):'-'}</td><td class="num">${r.attempts?fmtSec(Number(r.avg_time_sec)):'-'}</td>
+        <td class="small">${esc(gradeName(r.grade))}</td><td class="num">${r.attempts}</td><td class="num">${r.attempts?pct(Number(r.accuracy)):'-'}</td><td class="num">${r.attempts?fmtSec(Number(r.avg_time_sec)):'-'}</td>
         <td>${r.last_activity?new Date(r.last_activity).toLocaleString('ko-KR',{dateStyle:'short',timeStyle:'short'}):'-'}</td></tr>`).join('')}</table></div>`;
-    el.querySelectorAll('[data-pick]').forEach(a=>a.onclick=e=>{ e.preventDefault(); anaF.user = a.dataset.pick; delete ANA_CACHE[anaF.user]; viewAnalysis(); });
+    el.querySelectorAll('[data-pick]').forEach(a=>a.onclick=e=>{ e.preventDefault(); anaF.user = a.dataset.pick; anaF.grade = anaF.user===AUTH.id ? AUTH.grade : ''; delete ANA_CACHE[anaF.user]; viewAnalysis(); });
   }catch(e){ el.innerHTML = `<div class="small muted">사용자별 현황을 불러오지 못했습니다: ${esc(e.message)}</div>`; }
 }
 function viewAnalysis(){
@@ -864,10 +971,12 @@ function viewAnalysis(){
   }
   const subs = [...new Set(source.map(a=>a.subject))];
   const since = anaF.days ? Date.now() - anaF.days*86400000 : 0;
-  const atts = source.filter(a=>a.ts>=since && (!anaF.subject || a.subject===anaF.subject));
+  const grades = [...new Set(source.map(a=>a.grade||'h3'))];
+  const atts = source.filter(a=>a.ts>=since && (!anaF.subject || a.subject===anaF.subject) && (!anaF.grade || (a.grade||'h3')===anaF.grade));
   const userSel = isAdm ? `<select id="fu">${(SB.members||[{login_id:AUTH.id, user_id:1}]).filter(m=>m.active!==false).map(m=>`<option value="${esc(m.login_id)}" ${anaF.user===m.login_id?'selected':''}>👤 ${esc(m.login_id)}${m.login_id===AUTH.id?' (나)':''}${m.user_id?'':' · 미접속'}</option>`).join('')}</select>` : '';
   const head = `${isAdm?'<div class="card" id="usum"><div class="small muted">사용자별 현황 불러오는 중…</div></div>':''}
     <div class="row" style="margin-bottom:14px"><h2 style="margin:0">분석 리포트${other?` <span class="badge b-warn">${esc(anaF.user)}</span>`:''}</h2><span class="sp"></span>${userSel}
+    <select id="fg"><option value="">전체 학년</option>${GRADES.filter(([c])=>grades.includes(c)||c===anaF.grade).map(([c,n])=>`<option value="${c}" ${anaF.grade===c?'selected':''}>🎓 ${n}</option>`).join('')}</select>
     <select id="fd">${[[7,'최근 7일'],[30,'최근 30일'],[90,'최근 90일'],[0,'전체 기간']].map(([v,l])=>`<option value="${v}" ${anaF.days==v?'selected':''}>${l}</option>`).join('')}</select>
     <select id="fs"><option value="">전체 과목</option>${subs.map(s=>`<option ${anaF.subject===s?'selected':''}>${esc(s)}</option>`).join('')}</select></div>`;
   if(!atts.length){ $('#app').innerHTML = head + `<div class="card empty"><p>선택한 기간에 풀이 기록이 없습니다.</p>${other?'':`<button class="btn pri" onclick="go('setup')">문제 풀러 가기</button>`}</div>`; bindAnaFilters(); renderUserSummary(); return; }
@@ -905,7 +1014,8 @@ function viewAnalysis(){
   drawCharts(anaF.subject ? aggregate(atts, a=>a.unit) : bySub, byDay);
 }
 function bindAnaFilters(){
-  const fu = $('#fu'); if(fu) fu.onchange = e=>{ anaF.user = e.target.value; delete ANA_CACHE[anaF.user]; viewAnalysis(); };
+  const fu = $('#fu'); if(fu) fu.onchange = e=>{ anaF.user = e.target.value; anaF.grade = anaF.user===AUTH.id ? AUTH.grade : ''; delete ANA_CACHE[anaF.user]; viewAnalysis(); };
+  $('#fg').onchange = e=>{ anaF.grade = e.target.value; viewAnalysis(); };
   $('#fd').onchange = e=>{ anaF.days = +e.target.value; viewAnalysis(); };
   $('#fs').onchange = e=>{ anaF.subject = e.target.value; viewAnalysis(); };
 }
@@ -980,13 +1090,13 @@ function viewWrong(){
    - 풀이(정답·오답·부분)와 건너뛰기 이벤트를 시간순으로 조회 · 필터 · 상세 · CSV 내보내기
    - 관리자는 다른 사용자의 풀이기록도 조회 (DB 연결 시)
    ========================================================= */
-let logF = {days:7, from:'', to:'', subject:'', result:'', type:'', q:'', user:null, limit:50};
+let logF = {days:7, from:'', to:'', subject:'', result:'', type:'', q:'', user:null, limit:50, grade:''};
 function logEvents(source, own){
-  const ev = source.map(a=>({kind:'answer', ts:a.ts, qid:a.qid, subject:a.subject, unit:a.unit, type:a.type, difficulty:a.difficulty,
+  const ev = source.map(a=>({kind:'answer', grade:a.grade||'h3', ts:a.ts, qid:a.qid, subject:a.subject, unit:a.unit, type:a.type, difficulty:a.difficulty,
     answer:a.answer, score:a.score, time:a.time||0, sid:a.sid, appealed:a.appealed, points:a.points}));
   if(own) for(const [id,k] of Object.entries(DB.skips||{})){
     if(k.deleted) continue; const q = DB.questions.find(x=>x.id===id);
-    ev.push({kind:'skip', ts:k.ts||k.mt, qid:id, subject:q?.subject||'', unit:q?.unit||'', type:q?.type||'', difficulty:q?.difficulty||'', time:0});
+    ev.push({kind:'skip', grade:q?.grade||AUTH.grade, ts:k.ts||k.mt, qid:id, subject:q?.subject||'', unit:q?.unit||'', type:q?.type||'', difficulty:q?.difficulty||'', time:0});
   }
   return ev.sort((x,y)=>y.ts-x.ts);
 }
@@ -1001,7 +1111,7 @@ function filteredLog(events){
   const now = Date.now(), from = logF.from ? new Date(logF.from+'T00:00:00').getTime() : (logF.days ? now - logF.days*86400000 : 0);
   const to = logF.to ? new Date(logF.to+'T23:59:59.999').getTime() : Infinity;
   const qmap = new Map(DB.questions.map(q=>[q.id,q])), kw = logF.q.trim().toLowerCase();
-  return events.filter(e=>e.ts>=from && e.ts<=to && (!logF.subject || e.subject===logF.subject) && (!logF.type || e.type===logF.type)
+  return events.filter(e=>e.ts>=from && e.ts<=to && (!logF.grade || e.grade===logF.grade) && (!logF.subject || e.subject===logF.subject) && (!logF.type || e.type===logF.type)
     && (!logF.result || resultOf(e)===logF.result)
     && (!kw || String(e.qid).toLowerCase().includes(kw) || (qmap.get(e.qid)?.text||'').toLowerCase().includes(kw) || (e.unit||'').toLowerCase().includes(kw)));
 }
@@ -1025,6 +1135,7 @@ function viewLog(){
     <div class="card"><div class="row">
       <select id="ld">${[[1,'오늘·최근 1일'],[7,'최근 7일'],[30,'최근 30일'],[90,'최근 90일'],[0,'전체 기간'],['custom','기간 지정']].map(([v,l])=>`<option value="${v}" ${(logF.from||logF.to?'custom':String(logF.days))===String(v)?'selected':''}>${l}</option>`).join('')}</select>
       <span id="lrange" ${logF.from||logF.to?'':'hidden'}><input type="date" id="lfrom" value="${esc(logF.from)}"> ~ <input type="date" id="lto" value="${esc(logF.to)}"></span>
+      <select id="lg">${opt('','전체 학년',logF.grade)}${GRADES.filter(([c])=>events.some(e=>e.grade===c)||c===logF.grade).map(([c,n])=>opt(c,'🎓 '+n,logF.grade)).join('')}</select>
       <select id="ls">${opt('','전체 과목',logF.subject)}${subs.map(x=>opt(x,x,logF.subject)).join('')}</select>
       <select id="lr">${opt('','전체 결과',logF.result)}${Object.entries(RESULT_LABEL).filter(([k])=>!other||k!=='skip').map(([k,[l]])=>opt(k,l,logF.result)).join('')}</select>
       <select id="lt">${opt('','전체 유형',logF.type)}${TYPES.map(t=>opt(t,t,logF.type)).join('')}</select>
@@ -1036,10 +1147,11 @@ function viewLog(){
   $('#lfrom').onchange = e=>{ logF.from = e.target.value; body(); };
   $('#lto').onchange = e=>{ logF.to = e.target.value; body(); };
   $('#ls').onchange = e=>{ logF.subject = e.target.value; body(); };
+  $('#lg').onchange = e=>{ logF.grade = e.target.value; body(); };
   $('#lr').onchange = e=>{ logF.result = e.target.value; body(); };
   $('#lt').onchange = e=>{ logF.type = e.target.value; body(); };
   $('#lq').oninput = e=>{ logF.q = e.target.value; clearTimeout(viewLog._t); viewLog._t = setTimeout(body, 250); };
-  const lu = $('#lu'); if(lu) lu.onchange = e=>{ logF.user = e.target.value; delete ANA_CACHE[logF.user]; viewLog(); };
+  const lu = $('#lu'); if(lu) lu.onchange = e=>{ logF.user = e.target.value; logF.grade = logF.user===AUTH.id ? AUTH.grade : ''; delete ANA_CACHE[logF.user]; viewLog(); };
   $('#lcsv').onclick = ()=> exportLogCSV(filteredLog(events));
   renderLogBody(events);
 }
@@ -1097,9 +1209,9 @@ function exportLogCSV(list){
   if(!list.length) return toast('내보낼 기록이 없습니다');
   const qmap = new Map(DB.questions.map(q=>[q.id,q]));
   const cell = v => { const t = v==null ? '' : String(v); return /[",\n]/.test(t) ? '"'+t.replace(/"/g,'""')+'"' : t; };
-  const head = ['일시','사용자','과목','단원','문항ID','문제','유형','난이도','제출 답','정답','결과','점수','소요(초)','정답 인정','세션'];
+  const head = ['일시','사용자','학년','과목','단원','문항ID','문제','유형','난이도','제출 답','정답','결과','점수','소요(초)','정답 인정','세션'];
   const lines = list.map(e=>{ const q = qmap.get(e.qid), d = new Date(e.ts);
-    return [`${dayKey(e.ts)} ${d.toLocaleTimeString('ko-KR',{hour12:false})}`, logF.user, e.subject, e.unit, e.qid, q ? String(q.text).replace(/\s+/g,' ').slice(0,200) : '(삭제된 문항)',
+    return [`${dayKey(e.ts)} ${d.toLocaleTimeString('ko-KR',{hour12:false})}`, logF.user, gradeName(e.grade), e.subject, e.unit, e.qid, q ? String(q.text).replace(/\s+/g,' ').slice(0,200) : '(삭제된 문항)',
             e.type, e.difficulty, e.kind==='skip' ? '' : e.answer, q ? q.answer : '', RESULT_LABEL[resultOf(e)][0], e.kind==='skip' ? '' : e.score, e.kind==='skip' ? '' : e.time, e.appealed ? 'Y' : '', e.sid||''].map(cell).join(','); });
   const blob = new Blob(['﻿' + [head.join(','), ...lines].join('\r\n')], {type:'text/csv;charset=utf-8'});
   saveBlob(blob, `tamgu-log_${logF.user}_${dayKey(Date.now())}.csv`);   // 기기 호환을 위해 영문 파일명
@@ -1188,193 +1300,133 @@ const SAMPLE = [
 ];
 
 /* =========================================================
-   13. 공용 문제은행 (웹 호스팅 시 index.html 옆의 questions.xlsx 자동 동기화)
-   - 파일 내용이 바뀌었을 때만 다시 불러옴 (해시 비교)
-   - 공용 문항은 src:'shared'로 표시, 사용자가 직접 올린 개인 문항과 학습기록은 유지
+   13. 문제은행 (Supabase DB: 학년 × 과목)
+   - 사용자는 자기 학년의 과목별 문제은행을 받음 (바뀐 과목만 다시 받고 나머지는 기기 캐시 사용)
+   - 관리자는 학년·과목별로 등록/교체/삭제
    ========================================================= */
-const SHARED_FILE = 'bank.enc';
-const SHARED_INFO = {available:false, loading:false, error:null};
-function hashBuf(buf){ const b = new Uint8Array(buf); let h = 0x811c9dc5; for(let i=0;i<b.length;i++){ h ^= b[i]; h = Math.imul(h, 0x01000193); } return (h>>>0).toString(16)+'-'+b.length; }
-async function syncSharedBank(force){
-  if(!AUTH || location.protocol==='file:') return;
-  SHARED_INFO.loading = true; let changed = false;
+const BANK_CACHE = 'tamgu_bank_v2';
+const BANK = {sig:null, banks:[], loading:false, error:null};
+function bankCacheGet(){ try{ return JSON.parse(localStorage.getItem(BANK_CACHE)||'{}'); }catch(e){ return {}; } }
+function bankCacheSet(c){ try{ localStorage.setItem(BANK_CACHE, JSON.stringify(c)); }catch(e){ try{ localStorage.removeItem(BANK_CACHE); }catch(_){} } }
+function dbToQ(r, b){
+  return {id:r.question_id, subject:b.subject, grade:b.grade, bankId:b.id, unit:r.unit, subunit:r.subunit||'', type:r.q_type, difficulty:r.difficulty||'중',
+          text:r.text, image:r.image||'', choices:Array.isArray(r.choices)?r.choices:[], answer:r.answer, explanation:r.explanation||'',
+          points:Number(r.points)||(r.q_type==='객관식'?2:3), criteria:r.criteria||'', src:'shared'};
+}
+function qToDb(q, bankId){
+  return {question_id:String(q.id), bank_id:bankId, unit:q.unit||'', subunit:q.subunit||null, q_type:TYPES.includes(q.type)?q.type:'객관식',
+          difficulty:DIFFS.includes(q.difficulty)?q.difficulty:'중', text:q.text, image:q.image||null, choices:q.choices||[], answer:String(q.answer),
+          explanation:q.explanation||null, points:Number(q.points)||null, criteria:q.criteria||null, updated_at:new Date().toISOString()};
+}
+const fetchBanks = grade => sbFetch(`/rest/v1/question_banks?select=id,grade,subject,question_count,updated_at&order=subject.asc${grade?`&grade=eq.${grade}`:''}`);
+async function loadGradeQuestions(grade, {cache=true} = {}){
+  const banks = await fetchBanks(grade);
+  const C = cache ? bankCacheGet() : {}, g = C[grade] || (C[grade] = {q:{}}); g.q = g.q || {};
+  const out = [];
+  for(const b of banks){
+    let e = g.q[b.id];
+    if(!e || e.u !== b.updated_at){ e = g.q[b.id] = {u:b.updated_at, items:(await sbAll('questions', `select=*&bank_id=eq.${b.id}&order=question_id.asc`)).map(r=>dbToQ(r, b))}; }
+    out.push(...e.items);
+  }
+  for(const id of Object.keys(g.q)) if(!banks.some(b=>String(b.id)===id)) delete g.q[id];
+  if(cache){ g.banks = banks; for(const k of Object.keys(C)) if(k!==grade) delete C[k]; bankCacheSet(C); }   // 기기에는 내 학년만 보관
+  return {banks, questions: out};
+}
+const bankSig = (grade, banks) => grade + '|' + banks.map(b=>b.id+':'+b.updated_at).join(',');
+async function syncBank(force){
+  if(!AUTH || !SB.session || !AUTH.grade || BANK.loading) return;
+  BANK.loading = true; let changed = false; const grade = AUTH.grade;
   try{
-    const res = await fetch(SHARED_FILE, {cache:'no-cache'});
-    if(!res.ok) return;                                   // 공용 파일이 없으면 개인용으로 동작
-    SHARED_INFO.available = true;
-    const buf = await res.arrayBuffer(), hash = hashBuf(buf);
-    const had = DB.questions.filter(q=>q.src==='shared').length;
-    if(!force && hash===DB.sharedHash && had) return;
-    const valid = await decryptBank(buf), errors = [];
-    valid.forEach(q=>q.src='shared');
-    const ids = new Set(valid.map(q=>q.id));
-    DB.questions = [...valid, ...DB.questions.filter(q=>q.src!=='shared' && !ids.has(q.id))];
-    DB.sharedHash = hash; SHARED_INFO.error = null; saveDB(); changed = true;
-    toast(`공용 문제은행 ${valid.length}문항을 ${had?'업데이트했':'불러왔'}습니다${errors.length?` (오류 ${errors.length}행 제외)`:''}`);
-  }catch(e){ console.warn(e); SHARED_INFO.error = e.message; changed = true; }
-  finally{
-    SHARED_INFO.loading = false;
-    if((changed || !DB.questions.length || !syncSharedBank._once) && ['home','setup','upload'].includes(current)) VIEWS[current]();
-    syncSharedBank._once = true;   // 풀이 중에는 화면을 건드리지 않음
+    const {banks, questions} = await loadGradeQuestions(grade);
+    if(!AUTH || AUTH.grade !== grade) return;
+    const sig = bankSig(grade, banks);
+    if(force || sig !== BANK.sig){
+      const first = !BANK.sig; BANK.sig = sig; BANK.banks = banks;
+      const ids = new Set(questions.map(q=>q.id));
+      DB.questions = [...questions, ...DB.questions.filter(q=>q.src!=='shared' && !ids.has(q.id))];
+      changed = true;
+      if(!first && !force) toast(`🎓 ${gradeName(grade)} 문제은행이 업데이트되었습니다 (${questions.length}문항)`);
+    }
+    BANK.error = null;
+  }catch(e){ console.warn(e); BANK.error = e.message; changed = true; }
+  finally{ BANK.loading = false; if(changed && ['home','setup','me'].includes(current)) VIEWS[current](); }
+}
+/* 관리자: 학년·과목 문제은행에 문항 등록 */
+async function publishToBank(grade, qs, mode){
+  if(AUTH.role!=='admin') throw new Error('관리자만 등록할 수 있습니다');
+  const subs = [...new Set(qs.map(q=>q.subject))];
+  // 1) 문항ID 전체 고유성: 다른 학년 문제은행에 같은 ID가 있으면 중단
+  const bankById = new Map((await fetchBanks()).map(b=>[b.id, b])), conflicts = [];
+  for(let i=0; i<qs.length; i+=120){
+    const list = qs.slice(i, i+120).map(q=>'"'+String(q.id).replace(/["\\]/g, m=>'\\'+m)+'"').join(',');
+    const rows = await sbFetch(`/rest/v1/questions?select=question_id,bank_id&question_id=in.(${encodeURIComponent(list)})`);
+    for(const r of rows){ const b = bankById.get(r.bank_id); if(b && b.grade !== grade) conflicts.push(`${r.question_id}: 이미 ${gradeName(b.grade)} · ${b.subject} 문제은행에 있습니다`); }
   }
+  if(conflicts.length){ const e = new Error(`문항ID ${conflicts.length}건이 다른 학년 문제은행과 겹칩니다`); e.list = conflicts; throw e; }
+  // 2) 과목 문제은행 준비 (없으면 생성)
+  const banks = await sbFetch('/rest/v1/question_banks?on_conflict=grade,subject&select=id,grade,subject',
+    {method:'POST', body:subs.map(sub=>({grade, subject:sub})), headers:{Prefer:'resolution=merge-duplicates,return=representation'}});
+  const bid = new Map(banks.map(b=>[b.subject, b.id]));
+  // 3) 과목 교체: 해당 과목의 기존 문항만 삭제
+  if(mode==='replace') for(const sub of subs) await sbFetch(`/rest/v1/questions?bank_id=eq.${bid.get(sub)}`, {method:'DELETE', headers:{Prefer:'return=minimal'}});
+  // 4) 문항 저장 (같은 ID는 덮어쓰기)
+  await sbUpsert('questions', qs.map(q=>qToDb(q, bid.get(q.subject))), 'question_id');
+  return {count: qs.length, subjects: subs};
+}
+async function sbUploadImage(f){
+  await sbEnsure();
+  const r = await fetch(`${SB_URL}/storage/v1/object/qimages/${encodeURIComponent(f.name)}`, {method:'POST', body:f,
+    headers:{apikey:SB_KEY, Authorization:'Bearer '+SB.session.access_token, 'x-upsert':'true', 'Content-Type': f.type || mimeOf(f.name)}});
+  if(!r.ok){ let m = 'HTTP '+r.status; try{ const j = await r.json(); m = j.message || j.error || m; }catch(e){} throw new Error(m); }
 }
 
-/* =========================================================
-   14. 관리자 게시 (GitHub 저장소에 questions.xlsx / images 커밋)
-   - 토큰은 관리자 브라우저에만 저장되며 코드·저장소에는 포함되지 않음
-   - 게시 → GitHub Pages 재배포(약 1~2분) → 다른 사용자는 접속/새로고침 시 자동 반영
-   ========================================================= */
-const GH_KEY = 'tamgu_gh_admin';
-function detectRepo(){
-  const m = location.hostname.match(/^([^.]+)\.github\.io$/i);
-  if(!m) return {owner:'', repo:''};
-  const seg = location.pathname.split('/').filter(Boolean)[0];
-  return {owner:m[1], repo: seg && !/\.html?$/i.test(seg) ? seg : m[1]+'.github.io'};
+/* 이전 버전 문제은행(bank.enc) → 학년별·과목별 DB 문제은행으로 1회 이전 (관리자) */
+const LEGACY = {checked:false, available:false, done:false, qs:null};
+async function checkLegacy(){
+  if(AUTH.role!=='admin' || LEGACY.checked) return; LEGACY.checked = true;
+  try{
+    const r = await fetch('bank.enc', {cache:'no-cache'}); if(!r.ok) return;
+    if(!AUTH.key){ LEGACY.available = true; return; }
+    LEGACY.qs = await decryptBank(await r.arrayBuffer());
+    const sample = LEGACY.qs.slice(0, 60).map(q=>'"'+String(q.id).replace(/["\\]/g, m=>'\\'+m)+'"').join(',');
+    const found = sample ? await sbFetch(`/rest/v1/questions?select=question_id&question_id=in.(${encodeURIComponent(sample)})`) : [];
+    LEGACY.done = found.length >= Math.min(60, LEGACY.qs.length);
+    LEGACY.available = !LEGACY.done && LEGACY.qs.length > 0;
+  }catch(e){ console.warn(e); }
+  if(LEGACY.available && ['home','upload'].includes(current)) VIEWS[current]();
 }
-function loadGH(){
-  let d = null;
-  try{ d = JSON.parse(localStorage.getItem(GH_KEY) || sessionStorage.getItem(GH_KEY) || 'null'); }catch(e){}
-  return Object.assign({...detectRepo(), branch:'main', token:'', remember:false, verified:false, login:''}, d||{});
+function legacyCardHTML(compact){
+  if(AUTH.role!=='admin' || !LEGACY.available) return '';
+  const subs = LEGACY.qs ? [...new Set(LEGACY.qs.map(q=>q.subject))] : [];
+  return `<div class="card" style="border-color:var(--warn);background:var(--warn-weak)"><h3>📦 기존 문제은행 이전 필요</h3>
+    <p class="small" style="margin-top:0">이전 버전의 공용 문제은행${LEGACY.qs?` <b>${LEGACY.qs.length}문항</b> (${subs.map(esc).join(', ')})`:''}을 새 학년별·과목별 문제은행으로 옮깁니다. 문항ID가 그대로 유지되어 기존 풀이기록·오답노트도 이어집니다.</p>
+    ${LEGACY.qs ? `<div class="row"><b>이전할 학년</b><select id="lg_grade">${GRADES.map(([c,n])=>`<option value="${c}" ${c==='h3'?'selected':''}>${n}</option>`).join('')}</select>
+        <button class="btn pri sm" id="lg_go">이전 실행</button>${compact?'':'<span class="muted small">과목별 문제은행이 자동으로 만들어집니다</span>'}</div>`
+      : '<div class="msg wrn">이전하려면 로그아웃 후 다시 로그인해 주세요 (기존 문제은행의 암호를 풀 키가 필요합니다).</div>'}</div>`;
 }
-let GH = loadGH();
-function saveGH(){
-  try{ localStorage.removeItem(GH_KEY); sessionStorage.removeItem(GH_KEY);
-       if(GH.token) (GH.remember ? localStorage : sessionStorage).setItem(GH_KEY, JSON.stringify(GH)); }catch(e){}
-}
-const isAdmin = () => !!(GH.token && GH.verified);
-const encPath = path => path.split('/').map(encodeURIComponent).join('/');
-async function gh(path, {accept, allow404, cfg = GH, ...init} = {}){
-  const res = await fetch(`https://api.github.com/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}${path}`, {
-    cache:'no-store', ...init,
-    headers:{'Authorization':'Bearer '+cfg.token, 'Accept':accept||'application/vnd.github+json', 'X-GitHub-Api-Version':'2022-11-28', ...(init.body?{'Content-Type':'application/json'}:{})}});
-  if(!res.ok && !(allow404 && res.status===404)){
-    let msg = ''; try{ msg = (await res.json()).message; }catch(e){}
-    const hint = res.status===401 ? ' (토큰이 잘못되었거나 만료됨)' : res.status===403||res.status===404 ? ' (토큰에 이 저장소의 Contents 쓰기 권한이 있는지 확인)' : '';
-    const err = new Error(`GitHub ${res.status} ${msg}${hint}`); err.status = res.status; throw err;
-  }
-  return res;
-}
-async function ghGetFile(path, cfg = GH){
-  const q = `/contents/${encPath(path)}?ref=${encodeURIComponent(cfg.branch)}`;
-  const meta = await gh(q, {allow404:true, cfg}); if(meta.status===404) return null;
-  const j = await meta.json();
-  const raw = await gh(q, {accept:'application/vnd.github.raw', cfg});
-  return {sha:j.sha, buf: await raw.arrayBuffer()};
-}
-async function ghPutFile(path, b64, sha, message, cfg = GH){
-  const r = await gh(`/contents/${encPath(path)}`, {method:'PUT', cfg, body: JSON.stringify({message, content:b64, branch:cfg.branch, ...(sha?{sha}:{})})});
-  return r.json();
-}
-const b64ToBuf = b64 => Uint8Array.from(atob(b64), c=>c.charCodeAt(0)).buffer;
-const fileToB64 = f => new Promise((res,rej)=>{ const r = new FileReader(); r.onload = ()=>res(String(r.result).split(',')[1]); r.onerror = ()=>rej(r.error); r.readAsDataURL(f); });
-
-/* 최신 공용 파일을 받아 mutator로 변경 후 커밋. 동시 게시 충돌(409/422) 시 1회 재시도 */
-async function publishShared(mutator, message){
-  if(!isAdmin()) throw new Error('관리자 연결이 필요합니다');
-  for(let attempt=0; ; attempt++){
-    const cur = await ghGetFile(SHARED_FILE);
-    const qs = cur ? await decryptBank(cur.buf) : [];
-    const next = mutator(qs).map(q=>{ const c = {...q}; delete c.src; return c; });
-    const bytes = await encryptBank(next), b64 = b64e(bytes);
-    try{ await ghPutFile(SHARED_FILE, b64, cur?.sha, `[탐구문제] ${message}`); }
-    catch(e){ if((e.status===409 || e.status===422) && attempt===0) continue; throw e; }
-    // 내 화면에도 즉시 반영 (다음 동기화 때 같은 파일로 인식되도록 해시 저장)
-    next.forEach(q=>q.src='shared'); const ids = new Set(next.map(q=>q.id));
-    DB.questions = [...next, ...DB.questions.filter(q=>q.src!=='shared' && !ids.has(q.id))];
-    DB.sharedHash = hashBuf(bytes); SHARED_INFO.available = true; saveDB();
-    return next.length;
-  }
-}
-async function publishImage(f){
-  const path = 'images/' + f.name + '.enc';
-  const meta = await gh(`/contents/${encPath(path)}?ref=${encodeURIComponent(GH.branch)}`, {allow404:true});
-  const sha = meta.status===404 ? null : (await meta.json()).sha;
-  const {iv, ct} = await aesEnc(AUTH.key, new Uint8Array(await f.arrayBuffer()));
-  const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12);
-  await ghPutFile(path, b64e(out), sha, `[탐구문제] 이미지 게시(암호화): ${f.name}`);
-}
-
-function adminCardHTML(){
-  if(isAdmin()) return `<div class="card"><div class="row"><h3 style="margin:0">🔐 관리자 모드</h3>
-      <span class="badge b-ok">게시 권한 연결됨</span><span class="muted small">${esc(GH.owner)}/${esc(GH.repo)} · ${esc(GH.branch)}</span><span class="sp"></span>
-      <button class="btn sm" id="ghlogout">연결 해제</button></div>
-    <div class="row small" style="margin-top:8px">${GH.inAccount
-      ? '<span class="badge b-ok">✔ 모든 기기 자동 연결</span><span class="muted">이 계정으로 로그인하면 PC·패드·휴대폰 어디서든 바로 게시할 수 있습니다.</span>'
-      : `<span class="badge b-warn">이 기기만 연결됨</span><span class="muted">다른 기기에서도 쓰려면 →</span>
-         ${AUTH.kek?'':'<input type="password" id="acpw" placeholder="내 계정 비밀번호" style="width:150px" autocomplete="current-password">'}
-         <button class="btn sm pri" id="acsave">모든 기기에 자동 연결</button>`}</div>
-    <div class="hint">문제를 업로드하면 '공용 문제은행에 게시'를 선택할 수 있습니다. 게시한 문제는 약 1~2분 후 모든 사용자에게 자동 반영됩니다.</div>
-    <h3 style="margin:18px 0 8px">🗄 학습기록 DB (Supabase)</h3>
-    <div class="small">${SB.session ? '<span class="badge b-ok">연결됨</span> <span class="muted">모든 사용자의 학습기록이 DB에 저장되고 기기 간에 이어집니다. 사용자별 현황은 [분석] 화면에서 볼 수 있습니다.</span>'
-      : `<span class="badge b-bad">미연결</span> <span class="muted">${esc(SB.error || '로그아웃 후 다시 로그인하면 연결됩니다')}</span>`}</div>
-    <h3 style="margin:18px 0 8px">👥 사용자 관리</h3><div id="userlist" class="small muted">불러오는 중…</div>
-    <div class="row" style="margin-top:10px">
-      <input type="text" id="nu_id" placeholder="아이디 (영문·숫자)" style="width:150px" autocomplete="off">
-      <input type="password" id="nu_pw" placeholder="비밀번호 (8자 이상)" style="width:170px" autocomplete="new-password">
-      <select id="nu_role"><option value="user">일반 사용자</option><option value="admin">관리자</option></select>
-      <button class="btn sm pri" id="nu_add">추가 / 비밀번호 재설정</button></div>
-    <div class="hint">같은 아이디를 입력하면 비밀번호가 재설정됩니다. 변경 사항은 1~2분 후 로그인에 반영됩니다.</div></div>`;
-  return `<details class="card" id="admincard"><summary>🔐 관리자 설정 (공용 문제 게시 권한)</summary>
-    <p class="small muted">최초 1회만 설정합니다. GitHub 토큰을 연결하면 업로드한 문제가 모든 기기·사용자에게 보이도록 게시됩니다. 토큰은 내 계정 비밀번호로 암호화되어 저장되므로, 이후에는 어느 기기에서든 로그인만 하면 자동으로 연결됩니다.</p>
-    <div class="row"><label class="small">계정 <input type="text" id="ghowner" value="${esc(GH.owner)}" style="width:130px"></label>
-      <label class="small">저장소 <input type="text" id="ghrepo" value="${esc(GH.repo)}" style="width:150px"></label>
-      <label class="small">브랜치 <input type="text" id="ghbranch" value="${esc(GH.branch)}" style="width:90px"></label></div>
-    <div class="row" style="margin-top:8px"><input type="password" id="ghtoken" placeholder="GitHub 토큰 (github_pat_…)" style="flex:1;min-width:220px" autocomplete="off">
-      ${AUTH.kek?'':'<input type="password" id="ghacpw" placeholder="내 계정 비밀번호" style="width:150px" autocomplete="current-password">'}
-      <button class="btn sm pri" id="ghverify">연결 확인</button></div>
-    <label class="small" style="display:block;margin-top:6px"><input type="checkbox" id="ghaccount" checked> 모든 기기에서 자동 연결 (내 계정에 암호화 저장, 권장)</label>
-    <details style="margin-top:10px"><summary class="small">토큰 발급 방법 (최초 1회)</summary><ol class="small" style="margin:6px 0 0;padding-left:20px">
-      <li>GitHub → 우측 상단 프로필 → <b>Settings → Developer settings → Personal access tokens → Fine-grained tokens</b> → <b>Generate new token</b></li>
-      <li>Expiration: 90일 권장 · Repository access: <b>Only select repositories</b> → <b>${esc(GH.repo||'tamgu-quiz')}</b></li>
-      <li>Permissions → Repository permissions → <b>Contents: Read and write</b> → Generate token</li>
-      <li>생성된 토큰(github_pat_…)을 복사해 위 칸에 붙여넣고 [연결 확인]</li></ol>
-      <div class="hint">토큰은 이 저장소(파일 쓰기)로만 권한을 한정하세요. 공용 PC에서는 로그인 시 '로그인 상태 유지'를 끄세요.</div></details></details>`;
-}
-function bindAdminCard(){
-  if(isAdmin()) bindUserAdmin();
-  const lo = $('#ghlogout');
-  if(lo) lo.onclick = async ()=>{
-    if(!confirm(GH.inAccount ? '게시 권한 연결을 해제할까요? 계정에 저장된 토큰도 삭제되어 모든 기기에서 해제됩니다.' : '이 기기의 게시 권한 연결을 해제할까요?')) return;
-    if(GH.inAccount){ try{ await editUsers(U=>{ if(U.users[AUTH.id]) delete U.users[AUTH.id].gt; }, `게시 권한 계정 해제: ${AUTH.id}`); }catch(e){ toast('계정 토큰 삭제 실패: '+e.message, 6000); } }
-    GH.token=''; GH.verified=false; GH.inAccount=false; saveGH(); viewUpload();
-  };
-  const ac = $('#acsave');
-  if(ac) ac.onclick = async ()=>{
-    ac.disabled = true; ac.textContent = '저장 중…';
-    try{ await saveTokenToAccount($('#acpw')?.value); toast('모든 기기 자동 연결을 설정했습니다', 5000); viewUpload(); }
-    catch(e){ toast('실패: '+e.message, 6000); ac.disabled = false; ac.textContent = '모든 기기에 자동 연결'; }
-  };
-  const vb = $('#ghverify'); if(!vb) return;
-  vb.onclick = async ()=>{
-    GH.owner = $('#ghowner').value.trim(); GH.repo = $('#ghrepo').value.trim(); GH.branch = $('#ghbranch').value.trim() || 'main';
-    GH.token = $('#ghtoken').value.trim(); GH.verified = false; GH.inAccount = false;
-    try{ GH.remember = !!localStorage.getItem(AUTH_KEY); }catch(e){}
-    const toAccount = $('#ghaccount').checked, acpw = $('#ghacpw')?.value;
-    if(toAccount && !AUTH.kek && !acpw) return toast('모든 기기 자동 연결을 위해 내 계정 비밀번호를 입력하세요');
-    if(!GH.owner || !GH.repo || !GH.token) return toast('계정, 저장소, 토큰을 모두 입력하세요');
-    vb.disabled = true; vb.textContent = '확인 중…';
-    try{
-      const j = await (await gh('')).json();
-      if(j.permissions && !j.permissions.push) throw new Error('이 계정에 저장소 쓰기 권한이 없습니다');
-      GH.login = j.owner?.login || ''; GH.verified = true; saveGH();
-      let msg = '게시 권한 연결 완료. 이제 업로드한 문제를 공용으로 게시할 수 있습니다';
-      if(toAccount){ try{ await saveTokenToAccount(acpw); msg += ' (모든 기기 자동 연결 설정됨)'; }catch(e){ msg += ' · 모든 기기 연결 실패: ' + e.message; } }
-      toast(msg, 7000); viewUpload();
-    }catch(e){ GH.token=''; toast('연결 실패: '+e.message, 8000); vb.disabled = false; vb.textContent = '연결 확인'; }
+function bindLegacy(){
+  const b = $('#lg_go'); if(!b) return;
+  b.onclick = async ()=>{
+    const grade = $('#lg_grade').value;
+    if(!confirm(`기존 문제은행 ${LEGACY.qs.length}문항을 ${gradeName(grade)} 문제은행으로 이전합니다. 계속할까요?`)) return;
+    b.disabled = true; b.textContent = '이전 중…';
+    try{ const r = await publishToBank(grade, LEGACY.qs, 'add'); LEGACY.available = false; LEGACY.done = true;
+         toast(`${gradeName(grade)} 문제은행으로 ${r.count}문항(${r.subjects.join(', ')})을 이전했습니다`, 8000); BM.grade = grade; await afterBankChange(); if(current==='home'){ BANK.sig = null; await syncBank(true); } }
+    catch(e){ toast('이전 실패: '+e.message+(e.list?' — '+e.list[0]:''), 10000); b.disabled = false; b.textContent = '이전 실행'; }
   };
 }
 
-/* 다른 사용자: 탭으로 돌아올 때 공용 문제 변경 여부 확인 (풀이 중 제외) */
+/* 화면으로 돌아올 때: 문제은행 변경 확인 · 학습기록 저장/반영 (풀이 중 제외) */
 document.addEventListener('visibilitychange', ()=>{
-  if(AUTH && document.visibilityState==='visible' && current!=='quiz') syncSharedBank(false);
-  if(AUTH) syncRecords();       // 화면을 떠날 때 저장, 돌아올 때 다른 기기 기록 반영
+  if(!AUTH) return;
+  if(document.visibilityState==='visible' && current!=='quiz') syncBank(false);
+  syncRecords();
 });
 
 /* =========================================================
-   15. 로그인 · 암호화
-   - 공용 문제은행(bank.enc)과 이미지(images/*.enc)는 AES-256-GCM으로 암호화되어 저장
-   - users.json에는 비밀번호가 저장되지 않음: 각 사용자의 비밀번호(PBKDF2 60만회)로 감싼 '데이터 키'만 저장
-   - 올바른 아이디/비밀번호로만 데이터 키를 풀 수 있어, 저장소가 공개여도 문제 내용은 보호됨
+   15. 로그인 (Supabase 인증 · 회원 권한/학년)
+   - 아이디/비밀번호로 DB 인증 → 회원 정보(권한·학년·상태) 확인
+   - 이전 버전 계정(users.json)·문제은행(bank.enc)은 최초 연결과 1회 이전에만 사용
    ========================================================= */
 const te = new TextEncoder(), td = new TextDecoder();
 const AUTH_KEY = 'tamgu_auth';
@@ -1393,94 +1445,89 @@ async function decryptBank(buf){
   let plain; try{ plain = await aesDec(AUTH.key, b64d(j.iv), b64d(j.ct)); }catch(e){ throw new Error('문제은행 복호화 실패 (데이터 키 불일치)'); }
   return JSON.parse(td.decode(plain)).questions || [];
 }
-async function encryptBank(qs){
-  const {iv, ct} = await aesEnc(AUTH.key, te.encode(JSON.stringify({v:1, updated:new Date().toISOString(), questions:qs})));
-  return te.encode(JSON.stringify({v:1, alg:'AES-256-GCM', iv:b64e(iv), ct:b64e(ct)}));
+async function fetchUsers(){ try{ const r = await fetch('users.json', {cache:'no-cache'}); return r.ok ? r.json() : null; }catch(e){ return null; } }
+/* 이전 버전 계정(users.json): 기존 문제은행 이전용 키 확인, DB 계정 최초 연결에만 사용 */
+async function legacyUnwrap(id, pw){
+  const U = await fetchUsers(), u = U && U.users && U.users[id]; if(!u) return null;
+  try{ return await aesDec(await deriveKEK(pw, b64d(u.salt), U.iter), b64d(u.iv), b64d(u.wk)); }catch(e){ return null; }
 }
-async function wrapFor(pw, iter, keepToken){
-  const salt = crypto.getRandomValues(new Uint8Array(16)), kek = await deriveKEK(pw, salt, iter);
-  const {iv, ct} = await aesEnc(kek, AUTH.raw);
-  const out = {salt:b64e(salt), iv:b64e(iv), wk:b64e(ct)};
-  if(keepToken && GH.token){ const t = await aesEnc(kek, te.encode(GH.token)); out.gt = {owner:GH.owner, repo:GH.repo, branch:GH.branch, iv:b64e(t.iv), ct:b64e(t.ct), saved:new Date().toISOString()}; }
-  return {entry:out, kek};
+async function setLegacyKey(raw){ AUTH.raw = raw; AUTH.key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt','decrypt']); }
+function persistAuth(remember){
+  try{ const v = JSON.stringify({id:AUTH.id, role:AUTH.role, grade:AUTH.grade||null, k: AUTH.raw ? b64e(AUTH.raw) : null});
+       const useLocal = remember!=null ? remember : !!localStorage.getItem(AUTH_KEY);
+       localStorage.removeItem(AUTH_KEY); sessionStorage.removeItem(AUTH_KEY); (useLocal ? localStorage : sessionStorage).setItem(AUTH_KEY, v); }catch(e){}
 }
-async function fetchUsers(){
-  const r = await fetch('users.json', {cache:'no-cache'});
-  if(!r.ok) throw new Error('사용자 정보를 불러오지 못했습니다' + (location.protocol==='file:' ? ' (웹 주소로 접속해 주세요)' : ''));
-  return r.json();
-}
-async function setAuth(id, role, raw, remember){
-  AUTH = {id, role, raw, key: await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt','decrypt'])};
-  try{ sessionStorage.removeItem(AUTH_KEY); localStorage.removeItem(AUTH_KEY);
-       if(remember!=null) (remember ? localStorage : sessionStorage).setItem(AUTH_KEY, JSON.stringify({id, role, k:b64e(raw)})); }catch(e){}
-}
+async function loadProfile(){ const r = await sbFetch(`/rest/v1/members?select=login_id,role,grade,active&user_id=eq.${SB.session.user_id}`); return r && r[0]; }
 async function login(id, pw, remember){
-  id = id.trim().toLowerCase();
-  const U = await fetchUsers(), u = U.users?.[id];
+  id = id.trim().toLowerCase(); SB.error = null;
   const fail = new Error('아이디 또는 비밀번호가 올바르지 않습니다');
-  if(!u) { await deriveKEK(pw, new Uint8Array(16), U.iter); throw fail; }   // 응답시간으로 아이디 존재 여부가 드러나지 않도록
-  const kek = await deriveKEK(pw, b64d(u.salt), U.iter);
-  let raw; try{ raw = await aesDec(kek, b64d(u.iv), b64d(u.wk)); }catch(e){ throw fail; }
-  await setAuth(id, u.role||'user', raw, remember);
-  AUTH.kek = kek; AUTH.users = U;
-  // 게시 권한: 계정에 암호화 저장된 토큰이 있으면 어느 기기에서든 자동 연결
-  GH.token = ''; GH.verified = false; GH.inAccount = false; GH.remember = !!remember;
-  if(u.gt && (u.role||'user')==='admin'){
-    try{ GH.token = td.decode(await aesDec(kek, b64d(u.gt.iv), b64d(u.gt.ct)));
-         Object.assign(GH, {owner:u.gt.owner||GH.owner, repo:u.gt.repo||GH.repo, branch:u.gt.branch||'main', verified:true, inAccount:true}); }
-    catch(e){ GH.token = ''; }
-  }
-  saveGH();
-  // 학습기록 DB 로그인 (실패해도 사이트는 사용 가능, 기록은 기기에 보관)
-  try{ await sbLogin(id, pw, remember); }catch(e){ SB.error = e.message; console.warn(e); }
-}
-/* 현재 연결된 게시 권한(토큰)을 내 계정에 암호화 저장 → 다른 기기에서 로그인만 하면 자동 연결 */
-async function saveTokenToAccount(pw){
-  const cur = await ghGetFile('users.json'); if(!cur) throw new Error('users.json을 찾을 수 없습니다');
-  const U0 = JSON.parse(td.decode(cur.buf)), me = U0.users[AUTH.id]; if(!me) throw new Error('계정을 찾을 수 없습니다');
-  let kek = AUTH.kek;
-  if(!kek){
-    if(!pw) throw new Error('계정 비밀번호를 입력하세요');
-    kek = await deriveKEK(pw, b64d(me.salt), U0.iter);
-    try{ await aesDec(kek, b64d(me.iv), b64d(me.wk)); }catch(e){ throw new Error('계정 비밀번호가 올바르지 않습니다'); }
-    AUTH.kek = kek;
-  }
-  const {iv, ct} = await aesEnc(kek, te.encode(GH.token));
-  await editUsers(U=>{ const u = U.users[AUTH.id]; if(!u) throw new Error('계정을 찾을 수 없습니다');
-    if(u.salt !== me.salt) throw new Error('비밀번호가 방금 변경되었습니다. 다시 로그인 후 시도하세요');
-    u.gt = {owner:GH.owner, repo:GH.repo, branch:GH.branch, iv:b64e(iv), ct:b64e(ct), saved:new Date().toISOString()}; }, `게시 권한 계정 연결: ${AUTH.id}`);
-  GH.inAccount = true; saveGH();
+  if(!/^[a-z0-9._-]{3,30}$/.test(id) || !pw) throw fail;
+  let s = null;
+  try{ s = await sbFetch('/auth/v1/token?grant_type=password', {method:'POST', auth:false, body:{email:SB_EMAIL(id), password:pw}}); }
+  catch(e){ if(e.status !== 400) throw new Error('로그인 서버에 연결할 수 없습니다. 잠시 후 다시 시도하세요 (' + e.message + ')'); }
+  const legacy = await legacyUnwrap(id, pw);
+  if(!s){
+    if(!legacy) throw fail;
+    try{ s = await sbFetch('/auth/v1/signup', {method:'POST', auth:false, body:{email:SB_EMAIL(id), password:pw}}); }     // 이전 버전 계정 → DB 계정 최초 생성
+    catch(e){ if(e.code==='user_already_exists' || /already/i.test(e.message)) throw new Error('DB 계정 비밀번호가 다릅니다. 관리자에게 비밀번호 재설정을 요청하세요'); throw e; }
+    if(!s || !s.access_token) throw new Error('계정 생성 후 세션을 받지 못했습니다 (Supabase의 Confirm email 설정을 확인하세요)');
+    sbSetSession(s, remember);
+    try{ await sbFetch('/rest/v1/rpc/claim_member', {method:'POST', body:{}}); }
+    catch(e){ await sbLogout(); throw new Error('회원으로 등록되지 않은 아이디입니다. 관리자에게 문의하세요'); }
+  } else sbSetSession(s, remember);
+  let prof = null; try{ prof = await loadProfile(); }catch(e){}
+  if(!prof || !prof.active){ await sbLogout(); throw new Error(prof ? '비활성화된 계정입니다. 관리자에게 문의하세요' : '회원으로 등록되지 않은 아이디입니다. 관리자에게 문의하세요'); }
+  AUTH = {id:prof.login_id, role:prof.role, grade:prof.grade||null};
+  if(legacy) await setLegacyKey(legacy);
+  persistAuth(remember);
 }
 async function restoreAuth(){
-  try{ const s = sessionStorage.getItem(AUTH_KEY) || localStorage.getItem(AUTH_KEY); if(!s) return false;
-       const j = JSON.parse(s); await setAuth(j.id, j.role, b64d(j.k), null); sbRestore(); return true; }catch(e){ return false; }
+  try{ const v = sessionStorage.getItem(AUTH_KEY) || localStorage.getItem(AUTH_KEY); if(!v) return false;
+       const j = JSON.parse(v); sbRestore(); if(!SB.session) return false;
+       AUTH = {id:j.id, role:j.role, grade:j.grade||null}; if(j.k) await setLegacyKey(b64d(j.k)); return true; }
+  catch(e){ return false; }
+}
+async function refreshProfile(){                     // 관리자가 바꾼 권한·학년·상태 반영
+  if(!SB.session) return;
+  try{ const p = await loadProfile(); if(!p) return;
+    if(!p.active){ toast('비활성화된 계정입니다. 관리자에게 문의하세요', 8000); return logout(true); }
+    const gChanged = (p.grade||null) !== (AUTH.grade||null), rChanged = p.role !== AUTH.role;
+    AUTH.role = p.role; AUTH.grade = p.grade||null; persistAuth();
+    if(rChanged) applyRoleNav();
+    if(gChanged){ DB.questions = DB.questions.filter(q=>q.src!=='shared'); BANK.sig = null; cfg = null; anaF.grade = logF.grade = AUTH.grade||''; }
+    if(gChanged || rChanged){ renderUserbox(); if(current!=='quiz') go(current==='login'?'home':current); }
+  }catch(e){}
+}
+function applyRoleNav(){ document.querySelectorAll('#nav [data-admin]').forEach(b=>b.hidden = AUTH.role!=='admin'); }
+function renderUserbox(){
+  $('#userbox').innerHTML = `<a href="#" id="mebtn" title="내 정보 · 학년 변경">👤 <b>${esc(AUTH.id)}</b>${AUTH.role==='admin'?' <span class="badge b-pri">관리자</span>':''} <span class="badge b-ok">🎓 ${esc(gradeName(AUTH.grade))}</span></a><button class="btn sm" id="logout">로그아웃</button>`;
+  $('#mebtn').onclick = e=>{ e.preventDefault(); go('me'); };
+  $('#logout').onclick = ()=>logout();
+  setSyncStatus(SB.session ? (SYNC_STATE.error ? 'error' : 'idle') : 'off');
 }
 function enterApp(){
   LS_KEY = LS_BASE + ':' + AUTH.id;
-  try{ // 로그인 기능 이전의 기록을 첫 로그인 사용자에게 이관 (공용 문제는 다시 받음)
-    if(!localStorage.getItem(LS_KEY) && localStorage.getItem(LS_BASE)){
-      const d = JSON.parse(localStorage.getItem(LS_BASE)); d.questions = (d.questions||[]).filter(q=>q.src!=='shared'); d.sharedHash = null;
-      localStorage.setItem(LS_KEY, JSON.stringify(d)); localStorage.removeItem(LS_BASE);
-    }
-  }catch(e){}
-  DB = loadDB(); cfg = null; session = null; syncSharedBank._once = false;
-  $('#nav').hidden = false;
-  $('#userbox').innerHTML = `<span>👤 <b>${esc(AUTH.id)}</b>${AUTH.role==='admin'?' <span class="badge b-pri">관리자</span>':''}</span><button class="btn sm" id="logout">로그아웃</button>`;
-  $('#logout').onclick = logout;
-  setSyncStatus(SB.session ? 'idle' : 'off');
-  current = 'home'; go('home'); syncSharedBank(false);
-  if(SB.error) toast('학습기록 DB 연결 안 됨 (기록은 이 기기에 보관): ' + SB.error, 9000);
-  AUTH.users = null; anaF.user = AUTH.id; syncRecords();
+  DB = loadDB(); cfg = null; session = null; BANK.sig = null; BM.loadedGrade = null; BM.grade = null;
+  LEGACY.checked = false; LEGACY.available = false; LEGACY.qs = null;
+  if(AUTH.grade){                                        // 기기에 저장된 내 학년 문제은행으로 바로 시작 (이후 변경분만 받음)
+    const C = bankCacheGet()[AUTH.grade];
+    if(C && C.q){ const qs = Object.values(C.q).flatMap(e=>e.items||[]), ids = new Set(qs.map(q=>q.id));
+      DB.questions = [...qs, ...DB.questions.filter(q=>q.src!=='shared' && !ids.has(q.id))]; if(C.banks) BANK.sig = bankSig(AUTH.grade, C.banks); }
+  }
+  anaF.user = logF.user = AUTH.id; anaF.grade = logF.grade = AUTH.grade||'';
+  $('#nav').hidden = false; applyRoleNav(); renderUserbox();
+  current = 'home'; go('home');
+  if(SB.error) toast('DB 연결 안 됨: ' + SB.error, 9000);
+  refreshProfile().then(()=>{ syncBank(false); syncRecords(); checkLegacy(); });
 }
-async function logout(){
-  if(current==='quiz' && session && !session.done && !confirm('풀이 중인 세션을 종료하고 로그아웃할까요?')) return;
+async function logout(force){
+  if(!force && current==='quiz' && session && !session.done && !confirm('풀이 중인 세션을 종료하고 로그아웃할까요?')) return;
   clearInterval(timerId); session = null;
   clearTimeout(scheduleRecordSync._t);
-  if(SB.session){ setSyncStatus('busy'); try{ await Promise.race([syncRecords(), new Promise(r=>setTimeout(r, 8000))]); }catch(e){} }
+  if(SB.session && !force){ setSyncStatus('busy'); try{ await Promise.race([syncRecords(), new Promise(r=>setTimeout(r, 8000))]); }catch(e){} }
   await sbLogout();
   try{ sessionStorage.removeItem(AUTH_KEY); localStorage.removeItem(AUTH_KEY); }catch(e){}
-  GH.token = ''; GH.verified = false; GH.inAccount = false; saveGH();     // 게시 권한도 함께 해제 (다음 로그인 때 계정에서 다시 연결)
-  AUTH = null; DB = {questions:[], attempts:[], wrong:{}, settings:null, sharedHash:null}; current = 'login';
+  AUTH = null; DB = {questions:[], attempts:[], wrong:{}, settings:null}; current = 'login';
   viewLogin();
 }
 function viewLogin(){
@@ -1499,70 +1546,6 @@ function viewLogin(){
     btn.disabled = true; btn.textContent = '확인 중…'; err.style.display = 'none';
     try{ await login($('#lid').value, $('#lpw').value, $('#lrem').checked); enterApp(); }
     catch(x){ err.textContent = x.message; err.style.display = 'block'; btn.disabled = false; btn.textContent = '로그인'; $('#lpw').select(); }
-  };
-}
-
-/* 관리자: 사용자 추가 · 비밀번호 재설정 · 삭제 (users.json 커밋) */
-async function editUsers(mutate, message){
-  for(let attempt=0; ; attempt++){
-    const cur = await ghGetFile('users.json');
-    const U = cur ? JSON.parse(td.decode(cur.buf)) : {v:1, kdf:'PBKDF2-SHA256', iter:600000, users:{}};
-    await mutate(U);
-    try{ await ghPutFile('users.json', b64e(te.encode(JSON.stringify(U, null, 2))), cur?.sha, `[탐구문제] ${message}`); return U; }
-    catch(e){ if((e.status===409 || e.status===422) && attempt===0) continue; throw e; }
-  }
-}
-async function renderUserList(){
-  const el = $('#userlist'); if(!el) return;
-  try{
-    const cur = await ghGetFile('users.json'); const U = cur ? JSON.parse(td.decode(cur.buf)) : {users:{}};
-    const ids = Object.keys(U.users), mem = await loadMembers() || [];
-    const dbState = id => { const m = mem.find(x=>x.login_id===id); return !SB.session ? '-' : !m ? '<span class="badge b-bad">미등록</span>' : !m.active ? '<span class="badge b-mute">비활성</span>' : m.user_id ? '<span class="badge b-ok">연결됨</span>' : '<span class="badge b-warn">첫 로그인 대기</span>'; };
-    el.innerHTML = `<div class="tbl"><table><tr><th>아이디</th><th>권한</th><th>학습기록 DB</th><th>등록일</th><th></th></tr>${ids.map(id=>`<tr><td>${esc(id)}${id===AUTH.id?' <span class="badge b-mute">나</span>':''}</td>
-      <td>${U.users[id].role==='admin'?'관리자':'일반'}</td><td>${dbState(id)}</td><td>${esc((U.users[id].updated||U.users[id].created||'').slice(0,10))}</td>
-      <td class="num">${id===AUTH.id?'':`<button class="btn sm danger" data-deluser="${esc(id)}">삭제</button>`}</td></tr>`).join('')}</table></div>`;
-    el.querySelectorAll('[data-deluser]').forEach(b=>b.onclick=async()=>{
-      const id = b.dataset.deluser; if(!confirm(`사용자 '${id}'를 삭제할까요?`)) return;
-      b.disabled = true;
-      try{ await editUsers(U=>{ delete U.users[id]; }, `사용자 삭제: ${id}`);
-           let dbMsg = ''; if(SB.session){ try{ await sbFetch('/rest/v1/rpc/admin_deactivate_member', {method:'POST', body:{p_login:id}}); }catch(e){ dbMsg = ' · ⚠ DB 비활성화 실패: ' + e.message; } }
-           SB.members = null; toast(`'${id}' 삭제 완료 (1~2분 후 반영, 학습기록은 DB에 보존)${dbMsg}`, 6000); renderUserList(); }
-      catch(e){ toast('삭제 실패: '+e.message, 6000); b.disabled = false; }
-    });
-  }catch(e){ el.textContent = '사용자 목록을 불러오지 못했습니다: ' + e.message; }
-}
-function bindUserAdmin(){
-  renderUserList();
-  const add = $('#nu_add'); if(!add) return;
-  add.onclick = async ()=>{
-    const id = $('#nu_id').value.trim().toLowerCase(), pw = $('#nu_pw').value, role = $('#nu_role').value;
-    if(!/^[a-z0-9._-]{3,30}$/.test(id)) return toast('아이디는 영문 소문자·숫자 3~30자로 입력하세요');
-    if(pw.length < 8) return toast('비밀번호는 8자 이상으로 입력하세요');
-    add.disabled = true; add.textContent = '처리 중…';
-    try{
-      let existed = false;
-      let newKek = null; const self = id===AUTH.id;
-      await editUsers(async U=>{ existed = !!U.users[id];
-        const w = await wrapFor(pw, U.iter, self && !!U.users[id]?.gt); if(self) newKek = w.kek;
-        U.users[id] = {role: self ? (U.users[id]?.role||role) : role, ...w.entry, created: U.users[id]?.created || new Date().toISOString(), updated: new Date().toISOString()}; },
-        `사용자 추가/비밀번호 변경: ${id}`);
-      if(newKek) AUTH.kek = newKek;
-      let dbMsg = '';
-      if(SB.session){
-        try{
-          if(self) await sbFetch('/auth/v1/user', {method:'PUT', body:{password:pw}});
-          else {
-            await sbFetch('/rest/v1/rpc/admin_upsert_member', {method:'POST', body:{p_login:id, p_role:role}});
-            try{ await sbFetch('/rest/v1/rpc/admin_set_password', {method:'POST', body:{p_login:id, p_password:pw}}); }
-            catch(e){ if(!/no account/i.test(e.message)) throw e; }          // 아직 첫 로그인 전이면 로그인 시 자동 생성
-          }
-        }catch(e){ dbMsg = ' · ⚠ DB 반영 실패: ' + e.message; }
-      } else dbMsg = ' · ⚠ DB 미연결: 학습기록 DB에는 반영되지 않았습니다';
-      SB.members = null;
-      toast(`'${id}' ${existed?'비밀번호를 재설정':'사용자를 추가'}했습니다 (1~2분 후 로그인 가능)${dbMsg}`, dbMsg ? 10000 : 6000);
-      $('#nu_id').value = ''; $('#nu_pw').value = ''; renderUserList();
-    }catch(e){ toast('실패: '+e.message, 6000); }
-    add.disabled = false; add.textContent = '추가 / 비밀번호 재설정';
   };
 }
 
@@ -1612,20 +1595,6 @@ async function sbEnsure(){
   })();
   await sbEnsure._p;
 }
-async function sbLogin(id, pw, remember){
-  SB.error = null; SB.role = null; const email = SB_EMAIL(id); let s;
-  try{ s = await sbFetch('/auth/v1/token?grant_type=password', {method:'POST', auth:false, body:{email, password:pw}}); }
-  catch(e){
-    if(!(e.status===400 && (e.code==='invalid_credentials' || /invalid/i.test(e.message)))) throw e;
-    try{ s = await sbFetch('/auth/v1/signup', {method:'POST', auth:false, body:{email, password:pw}}); }      // 첫 로그인: DB 계정 자동 생성
-    catch(e2){ if(e2.code==='user_already_exists' || /already/i.test(e2.message)) throw new Error('DB 계정 비밀번호가 사이트 비밀번호와 다릅니다. 관리자에게 비밀번호 재설정을 요청하세요'); throw e2; }
-    if(!s || !s.access_token) throw new Error('DB 계정은 만들었지만 세션을 받지 못했습니다 (Supabase의 Confirm email 설정을 꺼 주세요)');
-  }
-  sbSetSession(s, remember);
-  try{ SB.role = await sbFetch('/rest/v1/rpc/claim_member', {method:'POST', body:{}}); }
-  catch(e){ sbSetSession(null); throw new Error('DB 회원으로 등록되지 않은 아이디입니다. 관리자에게 등록을 요청하세요'); }
-  sbSave(remember);
-}
 function sbRestore(){
   try{ const v = sessionStorage.getItem(SB_STORE) || localStorage.getItem(SB_STORE);
        if(v){ const j = JSON.parse(v); SB.session = j.s; SB.role = j.role; } }catch(e){}
@@ -1651,13 +1620,13 @@ const isMissingTable = e => e.status===404 || e.code==='PGRST205' || e.code==='4
 /* DB 행 ↔ 앱 기록 변환 */
 function rowToAttempt(r){
   return {qid:r.question_id, subject:r.subject, unit:r.unit, subunit:r.subunit||'', type:r.q_type, difficulty:r.difficulty, points:Number(r.points)||0,
-          score:Number(r.score), answer:r.answer, time:r.time_sec||0, ts:ms(r.answered_at), sid:r.session_id, ...(r.appealed?{appealed:true}:{}), k:r.client_key, mt:ms(r.updated_at)};
+          score:Number(r.score), answer:r.answer, time:r.time_sec||0, ts:ms(r.answered_at), sid:r.session_id, ...(r.appealed?{appealed:true}:{}), k:r.client_key, mt:ms(r.updated_at), grade:r.grade||'h3'};
 }
 function attemptToRow(a, uid){
   return {user_id:uid, client_key:a.k, question_id:String(a.qid), subject:a.subject||'', unit:a.unit||'', subunit:a.subunit||null,
           q_type: TYPES.includes(a.type) ? a.type : '객관식', difficulty: DIFFS.includes(a.difficulty) ? a.difficulty : null,
           points: Number(a.points)||null, score: Math.max(0, Math.min(1, Number(a.score)||0)), answer: a.answer==null ? null : String(a.answer),
-          time_sec: Math.max(0, Math.round(a.time||0)), session_id: a.sid||null, appealed: !!a.appealed, answered_at: iso(a.ts), updated_at: iso(a.mt||a.ts)};
+          time_sec: Math.max(0, Math.round(a.time||0)), session_id: a.sid||null, appealed: !!a.appealed, answered_at: iso(a.ts), updated_at: iso(a.mt||a.ts), grade: GRADES.some(g=>g[0]===a.grade) ? a.grade : null};
 }
 async function dbPull(uid){
   const q = `user_id=eq.${uid}`;
@@ -1773,7 +1742,7 @@ async function syncRecords(){
 }
 async function loadMembers(){
   if(!SB.session || AUTH.role!=='admin') return null;
-  try{ SB.members = await sbFetch('/rest/v1/members?select=login_id,role,user_id,active&order=login_id.asc'); }catch(e){ SB.members = null; }
+  try{ SB.members = await sbFetch('/rest/v1/members?select=login_id,role,grade,user_id,active&order=login_id.asc'); }catch(e){ SB.members = null; }
   return SB.members;
 }
 function removeLocalQ(pred){
